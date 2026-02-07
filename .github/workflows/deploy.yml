@@ -44,7 +44,7 @@ jobs:
 
       - name: Output Worker URL
         run: |
-          echo "Worker deployed. Check Cloudflare dashboard for URL."
+          echo "✅ Worker deployed: https://openclaw.propertyllama.com"
 
   deploy-pages:
     name: Deploy Pages
@@ -74,5 +74,5 @@ jobs:
 
       - name: Output Pages URL
         run: |
-          echo "Pages site deployed to: https://taskboard.pages.dev"
-          echo "(Or check Cloudflare dashboard for exact URL)"
+          echo "✅ Pages site deployed"
+          echo "🌐 Check Cloudflare dashboard for your Pages URL"
