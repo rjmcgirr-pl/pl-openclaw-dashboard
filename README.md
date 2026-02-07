@@ -2,6 +2,8 @@
 
 A full-stack task management board built with Cloudflare Workers, D1 (SQLite), and Pages. Features a kanban-style interface with drag-and-drop support.
 
+**Status**: Ready for deployment 🚀
+
 ## Architecture
 
 - **Frontend**: Static HTML/CSS/JS hosted on Cloudflare Pages
