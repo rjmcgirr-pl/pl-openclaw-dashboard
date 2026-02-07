@@ -1,6 +1,6 @@
 // Task Board Frontend
 // Configure this to point to your Worker API
-const API_BASE_URL = 'https://openclaw.propertyllama.com';
+const API_BASE_URL = 'https://taskboard-api.rei-workers.workers.dev';
 
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
