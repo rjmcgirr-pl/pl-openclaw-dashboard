@@ -35,10 +35,17 @@ jobs:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
-          # Use @ as delimiter (safe for this password)
-          sed -i "s@your-database-id-here@${DB_ID}@g" wrangler.toml
-          # Use single quotes and concatenation to preserve special chars
-          sed -i 's@your-password-here@'"${PASSWORD}"'@g' wrangler.toml
+          # Use Node.js for robust string replacement (handles any special chars)
+          node -e "
+            const fs = require('fs');
+            const content = fs.readFileSync('wrangler.toml', 'utf8');
+            const dbId = process.env.DB_ID;
+            const password = process.env.PASSWORD;
+            const updated = content
+              .replace(/your-database-id-here/g, dbId)
+              .replace(/your-password-here/g, password);
+            fs.writeFileSync('wrangler.toml', updated);
+          "
           echo "✅ Secrets injected into wrangler.toml"
 
       - name: Deploy Worker

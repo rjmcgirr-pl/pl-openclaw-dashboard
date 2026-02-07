@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API authentication via `X-Dashboard-Password` header
 
 ### Fixed
-- Sed delimiter issue with passwords containing special characters (`#`, `&`, `/`)
+- Use Node.js for secret injection (handles any special characters in passwords)
 
 ## [1.0.0] - 2026-02-07
 
