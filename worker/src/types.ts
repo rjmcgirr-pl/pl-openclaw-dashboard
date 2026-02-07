@@ -1,7 +1,8 @@
-import type { D1Database } from '@cloudflare/workers-types';
+import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
   DB: D1Database;
+  CRON_JOBS_KV: KVNamespace;
   ALLOWED_ORIGIN?: string;
   DASHBOARD_PASSWORD?: string;
 }
@@ -66,6 +67,9 @@ export interface CreateCronJobRequest {
   description?: string;
   schedule: string;
   skill_md_path?: string;
+  last_status?: CronJobStatus;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
 }
 
 export interface EndCronJobRequest {
