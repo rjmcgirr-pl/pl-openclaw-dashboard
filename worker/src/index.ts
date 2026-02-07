@@ -346,162 +346,299 @@ async function getCronJob(env: Env, id: number): Promise<Response> {
 }
 
 async function createCronJob(env: Env, request: Request): Promise<Response> {
-  const body = await request.json() as CreateCronJobRequest;
+  console.log('[createCronJob] Starting cron job creation...');
+  
+  try {
+    let body: CreateCronJobRequest;
+    try {
+      body = await request.json() as CreateCronJobRequest;
+      console.log('[createCronJob] Request body:', JSON.stringify(body));
+    } catch (parseError) {
+      console.error('[createCronJob] Failed to parse request body:', parseError);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+    }
 
-  // Validate required fields
-  if (!body.name || body.name.trim() === '') {
-    return errorResponse('Cron job name is required');
+    // Validate required fields
+    if (!body.name || body.name.trim() === '') {
+      console.log('[createCronJob] Validation failed: name is empty');
+      return errorResponse('Cron job name is required', 400);
+    }
+
+    if (!body.schedule || body.schedule.trim() === '') {
+      console.log('[createCronJob] Validation failed: schedule is empty');
+      return errorResponse('Schedule is required', 400);
+    }
+
+    const name = body.name.trim();
+    const description = body.description || null;
+    const schedule = body.schedule.trim();
+    const skillMdPath = body.skill_md_path || null;
+    const lastStatus = body.last_status || 'pending';
+
+    console.log('[createCronJob] Prepared values:', { name, description, schedule, skillMdPath, lastStatus });
+
+    let result;
+    try {
+      result = await env.DB.prepare(
+        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, last_status) 
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(name, description, schedule, skillMdPath, lastStatus).run();
+      console.log('[createCronJob] Insert result:', JSON.stringify(result));
+    } catch (insertError) {
+      console.error('[createCronJob] Database insert failed:', insertError);
+      return errorResponse('Database insert failed: ' + (insertError as Error).message, 500);
+    }
+
+    const lastRowId = result.meta?.last_row_id;
+    console.log('[createCronJob] Last row ID:', lastRowId);
+
+    if (!lastRowId) {
+      console.error('[createCronJob] No last_row_id returned from insert');
+      return errorResponse('Failed to get created cron job ID', 500);
+    }
+
+    // Fetch the created cron job
+    let cronJob;
+    try {
+      cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?')
+        .bind(lastRowId)
+        .first<CronJob>();
+      console.log('[createCronJob] Fetched created cron job:', JSON.stringify(cronJob));
+    } catch (fetchError) {
+      console.error('[createCronJob] Failed to fetch created cron job:', fetchError);
+      return errorResponse('Created cron job but failed to fetch it: ' + (fetchError as Error).message, 500);
+    }
+
+    if (!cronJob) {
+      console.error('[createCronJob] Created cron job not found in database');
+      return errorResponse('Created cron job not found', 500);
+    }
+
+    console.log('[createCronJob] Successfully created cron job:', cronJob.id);
+    return jsonResponse({ cronJob }, 201);
+  } catch (error) {
+    console.error('[createCronJob] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
-
-  if (!body.schedule || body.schedule.trim() === '') {
-    return errorResponse('Schedule is required');
-  }
-
-  const name = body.name.trim();
-  const description = body.description || null;
-  const schedule = body.schedule.trim();
-  const skillMdPath = body.skill_md_path || null;
-
-  const result = await env.DB.prepare(
-    `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, last_status) 
-     VALUES (?, ?, ?, ?, 'pending')`
-  ).bind(name, description, schedule, skillMdPath).run();
-
-  // Fetch the created cron job
-  const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?')
-    .bind(result.meta.last_row_id)
-    .first<CronJob>();
-
-  return jsonResponse({ cronJob }, 201);
 }
 
 async function updateCronJob(env: Env, id: number, request: Request): Promise<Response> {
-  // Check if cron job exists
-  const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  if (!existing) {
-    return errorResponse('Cron job not found', 404);
-  }
-
-  const body = await request.json() as Partial<CreateCronJobRequest>;
-  const updates: string[] = [];
-  const values: (string | null)[] = [];
-
-  // Build dynamic update query
-  if (body.name !== undefined) {
-    if (body.name.trim() === '') {
-      return errorResponse('Cron job name cannot be empty');
+  console.log(`[updateCronJob] Starting update for cron job ID: ${id}`);
+  
+  try {
+    // Check if cron job exists
+    const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+    if (!existing) {
+      console.log(`[updateCronJob] Cron job ${id} not found`);
+      return errorResponse('Cron job not found', 404);
     }
-    updates.push('name = ?');
-    values.push(body.name.trim());
+    console.log(`[updateCronJob] Found existing cron job:`, JSON.stringify(existing));
+
+    let body: Partial<CreateCronJobRequest>;
+    try {
+      body = await request.json() as Partial<CreateCronJobRequest>;
+      console.log('[updateCronJob] Request body:', JSON.stringify(body));
+    } catch (parseError) {
+      console.error('[updateCronJob] Failed to parse request body:', parseError);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+    }
+
+    const updates: string[] = [];
+    const values: (string | null)[] = [];
+
+    // Build dynamic update query
+    if (body.name !== undefined) {
+      if (body.name.trim() === '') {
+        console.log('[updateCronJob] Validation failed: name cannot be empty');
+        return errorResponse('Cron job name cannot be empty', 400);
+      }
+      updates.push('name = ?');
+      values.push(body.name.trim());
+    }
+
+    if (body.description !== undefined) {
+      updates.push('description = ?');
+      values.push(body.description || null);
+    }
+
+    if (body.schedule !== undefined) {
+      updates.push('schedule = ?');
+      values.push(body.schedule.trim());
+    }
+
+    if (body.skill_md_path !== undefined) {
+      updates.push('skill_md_path = ?');
+      values.push(body.skill_md_path || null);
+    }
+
+    if (updates.length === 0) {
+      console.log('[updateCronJob] No fields to update');
+      return errorResponse('No fields to update', 400);
+    }
+
+    values.push(id.toString());
+    console.log(`[updateCronJob] Update query: SET ${updates.join(', ')} WHERE id = ?`);
+    console.log('[updateCronJob] Values:', JSON.stringify(values));
+
+    try {
+      await env.DB.prepare(`UPDATE cron_jobs SET ${updates.join(', ')} WHERE id = ?`).bind(...values).run();
+      console.log('[updateCronJob] Update successful');
+    } catch (updateError) {
+      console.error('[updateCronJob] Database update failed:', updateError);
+      return errorResponse('Database update failed: ' + (updateError as Error).message, 500);
+    }
+
+    // Fetch the updated cron job
+    const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+    console.log('[updateCronJob] Fetched updated cron job:', JSON.stringify(cronJob));
+    return jsonResponse({ cronJob });
+  } catch (error) {
+    console.error('[updateCronJob] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
-
-  if (body.description !== undefined) {
-    updates.push('description = ?');
-    values.push(body.description || null);
-  }
-
-  if (body.schedule !== undefined) {
-    updates.push('schedule = ?');
-    values.push(body.schedule.trim());
-  }
-
-  if (body.skill_md_path !== undefined) {
-    updates.push('skill_md_path = ?');
-    values.push(body.skill_md_path || null);
-  }
-
-  if (updates.length === 0) {
-    return errorResponse('No fields to update');
-  }
-
-  values.push(id.toString());
-
-  await env.DB.prepare(`UPDATE cron_jobs SET ${updates.join(', ')} WHERE id = ?`).bind(...values).run();
-
-  // Fetch the updated cron job
-  const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  return jsonResponse({ cronJob });
 }
 
 async function deleteCronJob(env: Env, id: number): Promise<Response> {
-  // Check if cron job exists
-  const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  if (!existing) {
-    return errorResponse('Cron job not found', 404);
-  }
-
-  // Delete related runs first
-  await env.DB.prepare('DELETE FROM cron_job_runs WHERE cron_job_id = ?').bind(id).run();
+  console.log(`[deleteCronJob] Starting delete for cron job ID: ${id}`);
   
-  // Delete the cron job
-  await env.DB.prepare('DELETE FROM cron_jobs WHERE id = ?').bind(id).run();
-  return jsonResponse({ success: true, message: 'Cron job deleted' });
+  try {
+    // Check if cron job exists
+    const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+    if (!existing) {
+      console.log(`[deleteCronJob] Cron job ${id} not found`);
+      return errorResponse('Cron job not found', 404);
+    }
+    console.log(`[deleteCronJob] Found cron job to delete:`, JSON.stringify(existing));
+
+    try {
+      // Delete related runs first
+      const runsResult = await env.DB.prepare('DELETE FROM cron_job_runs WHERE cron_job_id = ?').bind(id).run();
+      console.log(`[deleteCronJob] Deleted ${runsResult.meta?.changes || 0} related run records`);
+      
+      // Delete the cron job
+      await env.DB.prepare('DELETE FROM cron_jobs WHERE id = ?').bind(id).run();
+      console.log(`[deleteCronJob] Cron job ${id} deleted successfully`);
+      
+      return jsonResponse({ success: true, message: 'Cron job deleted' });
+    } catch (deleteError) {
+      console.error('[deleteCronJob] Database delete failed:', deleteError);
+      return errorResponse('Database delete failed: ' + (deleteError as Error).message, 500);
+    }
+  } catch (error) {
+    console.error('[deleteCronJob] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+  }
 }
 
 async function startCronJob(env: Env, id: number): Promise<Response> {
-  // Check if cron job exists
-  const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  if (!existing) {
-    return errorResponse('Cron job not found', 404);
+  console.log(`[startCronJob] Starting cron job ID: ${id}`);
+  
+  try {
+    // Check if cron job exists
+    const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+    if (!existing) {
+      console.log(`[startCronJob] Cron job ${id} not found`);
+      return errorResponse('Cron job not found', 404);
+    }
+    console.log(`[startCronJob] Found cron job:`, JSON.stringify(existing));
+
+    const now = new Date().toISOString();
+    console.log(`[startCronJob] Setting last_run_at to: ${now}`);
+
+    try {
+      // Update cron job status to running
+      await env.DB.prepare(
+        `UPDATE cron_jobs 
+         SET last_run_at = ?, last_status = 'running', last_output = NULL 
+         WHERE id = ?`
+      ).bind(now, id).run();
+      console.log('[startCronJob] Cron job updated to running status');
+
+      // Create a run record
+      const runResult = await env.DB.prepare(
+        `INSERT INTO cron_job_runs (cron_job_id, started_at, status) 
+         VALUES (?, ?, 'running')`
+      ).bind(id, now).run();
+      console.log(`[startCronJob] Created run record, ID: ${runResult.meta?.last_row_id}`);
+
+      // Fetch the updated cron job
+      const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+      console.log('[startCronJob] Cron job started successfully:', JSON.stringify(cronJob));
+      return jsonResponse({ cronJob, message: 'Cron job started' });
+    } catch (dbError) {
+      console.error('[startCronJob] Database operation failed:', dbError);
+      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500);
+    }
+  } catch (error) {
+    console.error('[startCronJob] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
-
-  const now = new Date().toISOString();
-
-  // Update cron job status to running
-  await env.DB.prepare(
-    `UPDATE cron_jobs 
-     SET last_run_at = ?, last_status = 'running', last_output = NULL 
-     WHERE id = ?`
-  ).bind(now, id).run();
-
-  // Create a run record
-  await env.DB.prepare(
-    `INSERT INTO cron_job_runs (cron_job_id, started_at, status) 
-     VALUES (?, ?, 'running')`
-  ).bind(id, now).run();
-
-  // Fetch the updated cron job
-  const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  return jsonResponse({ cronJob, message: 'Cron job started' });
 }
 
 async function endCronJob(env: Env, id: number, request: Request): Promise<Response> {
-  // Check if cron job exists
-  const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
-  if (!existing) {
-    return errorResponse('Cron job not found', 404);
+  console.log(`[endCronJob] Ending cron job ID: ${id}`);
+  
+  try {
+    // Check if cron job exists
+    const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+    if (!existing) {
+      console.log(`[endCronJob] Cron job ${id} not found`);
+      return errorResponse('Cron job not found', 404);
+    }
+    console.log(`[endCronJob] Found cron job:`, JSON.stringify(existing));
+
+    let body: EndCronJobRequest;
+    try {
+      body = await request.json() as EndCronJobRequest;
+      console.log('[endCronJob] Request body:', JSON.stringify(body));
+    } catch (parseError) {
+      console.error('[endCronJob] Failed to parse request body:', parseError);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+    }
+
+    // Validate status
+    const validEndStatuses: CronJobStatus[] = ['done', 'error'];
+    const status = body.status;
+    if (!validEndStatuses.includes(status)) {
+      console.log(`[endCronJob] Invalid status: ${status}`);
+      return errorResponse(`Invalid status. Must be one of: ${validEndStatuses.join(', ')}`, 400);
+    }
+
+    const now = new Date().toISOString();
+    const output = body.output || null;
+    console.log(`[endCronJob] Setting status to: ${status}, ended_at: ${now}`);
+
+    try {
+      // Update cron job
+      await env.DB.prepare(
+        `UPDATE cron_jobs 
+         SET last_status = ?, last_output = ? 
+         WHERE id = ?`
+      ).bind(status, output, id).run();
+      console.log('[endCronJob] Cron job status updated');
+
+      // Update the latest run record
+      const updateResult = await env.DB.prepare(
+        `UPDATE cron_job_runs 
+         SET ended_at = ?, status = ?, output = ? 
+         WHERE cron_job_id = ? AND status = 'running'
+         ORDER BY started_at DESC
+         LIMIT 1`
+      ).bind(now, status, output, id).run();
+      console.log(`[endCronJob] Updated ${updateResult.meta?.changes || 0} run record(s)`);
+
+      // Fetch the updated cron job
+      const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
+      console.log('[endCronJob] Cron job ended successfully:', JSON.stringify(cronJob));
+      return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
+    } catch (dbError) {
+      console.error('[endCronJob] Database operation failed:', dbError);
+      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500);
+    }
+  } catch (error) {
+    console.error('[endCronJob] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
-
-  const body = await request.json() as EndCronJobRequest;
-
-  // Validate status
-  const validEndStatuses: CronJobStatus[] = ['done', 'error'];
-  const status = body.status;
-  if (!validEndStatuses.includes(status)) {
-    return errorResponse(`Invalid status. Must be one of: ${validEndStatuses.join(', ')}`);
-  }
-
-  const now = new Date().toISOString();
-  const output = body.output || null;
-
-  // Update cron job
-  await env.DB.prepare(
-    `UPDATE cron_jobs 
-     SET last_status = ?, last_output = ? 
-     WHERE id = ?`
-  ).bind(status, output, id).run();
-
-  // Update the latest run record
-  await env.DB.prepare(
-    `UPDATE cron_job_runs 
-     SET ended_at = ?, status = ?, output = ? 
-     WHERE cron_job_id = ? AND status = 'running'
-     ORDER BY started_at DESC
-     LIMIT 1`
-  ).bind(now, status, output, id).run();
-
-  // Fetch the updated cron job
-  const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
   return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
 }
 
