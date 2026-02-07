@@ -250,7 +250,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
 
   const body = await request.json() as UpdateTaskRequest;
   const updates: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
 
   // Build dynamic update query
   if (body.name !== undefined) {
