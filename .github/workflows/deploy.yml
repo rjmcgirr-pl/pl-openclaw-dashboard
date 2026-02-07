@@ -34,7 +34,7 @@ jobs:
         run: |
           sed -i "s/your-database-id-here/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
 
-      - name: Deploy Worker (auto-creates if missing)
+      - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -49,20 +49,11 @@ jobs:
   deploy-pages:
     name: Deploy Pages
     runs-on: ubuntu-latest
-    needs: deploy-worker  # Deploy Pages after Worker succeeds
+    needs: deploy-worker
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Create Pages Project (if not exists)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: .
-          command: pages project create taskboard --production-branch=main
-        continue-on-error: true  # Continue if project already exists
 
       - name: Deploy Pages
         uses: cloudflare/wrangler-action@v3
