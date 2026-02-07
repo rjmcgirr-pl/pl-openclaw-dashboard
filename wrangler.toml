@@ -1,0 +1,6 @@
+# Cloudflare Task Board
+
+name = "taskboard-pages"
+pages_build_output_dir = "public"
+
+# No build step needed - static HTML/JS/CSS

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Board</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 Task Board</h1>
+            <button id="newTaskBtn" class="btn-primary">+ New Task</button>
+        </header>
+
+        <div class="board">
+            <div class="column" data-status="inbox">
+                <div class="column-header">
+                    <span class="column-title">📥 Inbox</span>
+                    <span class="column-count" id="count-inbox">0</span>
+                </div>
+                <div class="column-tasks" id="col-inbox"></div>
+            </div>
+
+            <div class="column" data-status="up_next">
+                <div class="column-header">
+                    <span class="column-title">⬆️ Up Next</span>
+                    <span class="column-count" id="count-up_next">0</span>
+                </div>
+                <div class="column-tasks" id="col-up_next"></div>
+            </div>
+
+            <div class="column" data-status="in_progress">
+                <div class="column-header">
+                    <span class="column-title">🔨 In Progress</span>
+                    <span class="column-count" id="count-in_progress">0</span>
+                </div>
+                <div class="column-tasks" id="col-in_progress"></div>
+            </div>
+
+            <div class="column" data-status="in_review">
+                <div class="column-header">
+                    <span class="column-title">👀 In Review</span>
+                    <span class="column-count" id="count-in_review">0</span>
+                </div>
+                <div class="column-tasks" id="col-in_review"></div>
+            </div>
+
+            <div class="column" data-status="done">
+                <div class="column-header">
+                    <span class="column-title">✅ Done</span>
+                    <span class="column-count" id="count-done">0</span>
+                </div>
+                <div class="column-tasks" id="col-done"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New/Edit Task Modal -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">New Task</h2>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <form id="taskForm">
+                <input type="hidden" id="taskId">
+                <div class="form-group">
+                    <label for="taskName">Name *</label>
+                    <input type="text" id="taskName" required placeholder="Enter task name">
+                </div>
+                <div class="form-group">
+                    <label for="taskDescription">Description</label>
+                    <textarea id="taskDescription" rows="3" placeholder="Enter task description"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="taskStatus">Status</label>
+                        <select id="taskStatus">
+                            <option value="inbox">📥 Inbox</option>
+                            <option value="up_next">⬆️ Up Next</option>
+                            <option value="in_progress">🔨 In Progress</option>
+                            <option value="in_review">👀 In Review</option>
+                            <option value="done">✅ Done</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="taskPriority">Priority</label>
+                        <input type="number" id="taskPriority" min="0" max="10" value="0" placeholder="0-10">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="taskBlocked">
+                            <span>🚫 Blocked</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="taskAssigned">
+                            <span>🤖 Assign to Agent</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="deleteTaskBtn" class="btn-danger" style="display: none;">Delete</button>
+                    <button type="submit" class="btn-primary">Save Task</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
