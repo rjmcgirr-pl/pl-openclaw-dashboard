@@ -1,5 +1,6 @@
 -- D1 Schema for Cloudflare Task Board
 -- Run: wrangler d1 execute taskboard-db --file=./schema.sql
+-- Last applied: 2026-02-07
 
 -- Drop table if exists (for clean setup)
 DROP TABLE IF EXISTS cron_job_runs;
