@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Use Node.js for secret injection (handles any special characters in passwords)
 - Add cache-busting headers and versioned assets to prevent stale code
+- Add `X-Dashboard-Password` to CORS allowed headers
+- Fix: setupEventListeners was not called when showing login form
 
 ## [1.0.0] - 2026-02-07
 
