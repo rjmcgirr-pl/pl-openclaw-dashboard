@@ -1,6 +1,8 @@
 // Task Board Frontend
 // Configure this to point to your Worker API
-const API_BASE_URL = ''; // Empty for same-origin, or set to your Worker URL
+// In production with custom domain, this should be empty (same-origin)
+// For separate Worker/Pages deployments, set this to your Worker URL
+const API_BASE_URL = window.API_BASE_URL || ''; // Can be overridden via window.API_BASE_URL
 
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
@@ -50,14 +52,18 @@ const taskAssignedField = document.getElementById('taskAssigned');
 
 // Initialize
 async function init() {
+    console.log('[Init] Starting dashboard...');
+    
     // Check if password is required
     if (!dashboardPassword) {
+        console.log('[Init] No password found, showing login modal');
         showLoginModal();
         return;
     }
     
     // Verify password works by loading tasks
     try {
+        console.log('[Init] Checking stored password...');
         await loadTasks();
         await loadCronJobs();
         setupEventListeners();
@@ -71,9 +77,10 @@ async function init() {
         if (logoutBtn) {
             logoutBtn.style.display = 'block';
         }
+        console.log('[Init] Dashboard initialized successfully');
     } catch (error) {
         // If auth failed, login modal will be shown by apiRequest
-        console.log('Auth check failed, showing login');
+        console.log('[Init] Auth check failed, showing login:', error.message);
     }
 }
 
@@ -123,7 +130,10 @@ async function handleLogin(password) {
         
         return true;
     } catch (error) {
+        // Clear the password on failure
         dashboardPassword = '';
+        sessionStorage.removeItem('dashboardPassword');
+        console.error('Login failed:', error.message);
         return false;
     }
 }
@@ -131,6 +141,8 @@ async function handleLogin(password) {
 // API Functions
 async function apiRequest(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    console.log(`[API] Request to: ${url}`, options.method || 'GET');
+    
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers,
@@ -141,10 +153,19 @@ async function apiRequest(endpoint, options = {}) {
         headers['X-Dashboard-Password'] = dashboardPassword;
     }
     
-    const response = await fetch(url, {
-        ...options,
-        headers,
-    });
+    let response;
+    try {
+        response = await fetch(url, {
+            ...options,
+            headers,
+        });
+    } catch (networkError) {
+        // Network error (CORS, offline, DNS failure, etc.)
+        console.error('[API] Network error:', networkError);
+        throw new Error('Network error: Cannot connect to API. Please check your connection and ensure the API is running.');
+    }
+    
+    console.log(`[API] Response status: ${response.status}`);
     
     if (!response.ok) {
         // Handle 401 Unauthorized - show login modal
@@ -154,8 +175,23 @@ async function apiRequest(endpoint, options = {}) {
             showLoginModal();
             throw new Error('Authentication required. Please enter the password.');
         }
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `HTTP ${response.status}`);
+        
+        // Safely parse error response
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const error = await response.json();
+                errorMessage = error.error || errorMessage;
+            } else {
+                const text = await response.text();
+                if (text) errorMessage = text;
+            }
+        } catch (parseError) {
+            // If we can't parse the error, just use the status
+            console.warn('[API] Failed to parse error response:', parseError);
+        }
+        throw new Error(errorMessage);
     }
     
     return response.json();
@@ -448,21 +484,57 @@ function setupEventListeners() {
     const loginForm = document.getElementById('loginForm');
     const loginPasswordField = document.getElementById('loginPassword');
     const loginErrorDiv = document.getElementById('loginError');
+    const loginSubmitBtn = loginForm ? loginForm.querySelector('button[type="submit"]') : null;
 
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            console.log('[Login] Form submitted');
+            
+            // Clear previous errors
             loginErrorDiv.style.display = 'none';
             loginErrorDiv.textContent = '';
 
-            const password = loginPasswordField.value;
-            const success = await handleLogin(password);
-
-            if (!success) {
-                loginErrorDiv.textContent = 'Invalid password. Please try again.';
+            const password = loginPasswordField.value.trim();
+            
+            // Validate input
+            if (!password) {
+                loginErrorDiv.textContent = 'Please enter a password.';
                 loginErrorDiv.style.display = 'block';
-                loginPasswordField.value = '';
                 loginPasswordField.focus();
+                return;
+            }
+            
+            console.log('[Login] Password entered:', password ? 'Yes (length: ' + password.length + ')' : 'No');
+            
+            // Show loading state
+            const originalBtnText = loginSubmitBtn ? loginSubmitBtn.textContent : 'Login';
+            if (loginSubmitBtn) {
+                loginSubmitBtn.disabled = true;
+                loginSubmitBtn.textContent = 'Logging in...';
+            }
+            
+            try {
+                const success = await handleLogin(password);
+                console.log('[Login] handleLogin returned:', success);
+
+                if (!success) {
+                    console.log('[Login] Showing error message');
+                    loginErrorDiv.textContent = 'Invalid password. Please try again.';
+                    loginErrorDiv.style.display = 'block';
+                    loginPasswordField.value = '';
+                    loginPasswordField.focus();
+                }
+            } catch (err) {
+                console.error('[Login] Unexpected error in form handler:', err);
+                loginErrorDiv.textContent = 'Error: ' + err.message;
+                loginErrorDiv.style.display = 'block';
+            } finally {
+                // Restore button state
+                if (loginSubmitBtn) {
+                    loginSubmitBtn.disabled = false;
+                    loginSubmitBtn.textContent = originalBtnText;
+                }
             }
         });
     }

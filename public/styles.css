@@ -432,11 +432,12 @@ form {
 .login-error {
     background-color: rgba(218, 54, 51, 0.2);
     border: 1px solid var(--accent-danger);
-    color: var(--accent-danger);
+    color: #f85149;
     padding: 12px;
     border-radius: 6px;
     margin-bottom: 16px;
     font-size: 14px;
+    font-weight: 500;
 }
 
 #loginModal .form-actions {
@@ -445,6 +446,16 @@ form {
 
 #loginModal .form-actions button {
     max-width: 200px;
+}
+
+#loginModal .form-actions button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Ensure login modal is always on top */
+#loginModal {
+    z-index: 2000;
 }
 
 /* Tab Navigation */
