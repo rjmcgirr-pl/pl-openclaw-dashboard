@@ -44,6 +44,9 @@ async function init() {
     console.log('Task Board Initializing...');
     console.log('Auth password from sessionStorage:', authPassword ? 'Set (length: ' + authPassword.length + ')' : 'Not set');
     
+    // ALWAYS set up event listeners first (including login form)
+    setupEventListeners();
+    
     // Check if already authenticated
     if (authPassword) {
         console.log('Attempting auto-login with saved password...');
@@ -51,7 +54,6 @@ async function init() {
         try {
             await loadTasks();
             console.log('Auto-login successful');
-            setupEventListeners();
             setupDragAndDrop();
             startAutoRefresh();
         } catch (error) {
@@ -348,8 +350,18 @@ function closeModal() {
 
 // Event Listeners
 function setupEventListeners() {
+    console.log('Setting up event listeners...');
+    console.log('loginForm element:', loginForm);
+    console.log('loginPasswordField element:', loginPasswordField);
+    
     // Login form
+    if (!loginForm) {
+        console.error('ERROR: loginForm element not found!');
+        return;
+    }
+    
     loginForm.addEventListener('submit', async (e) => {
+        console.log('LOGIN FORM SUBMIT FIRED!');
         e.preventDefault();
         console.log('Login form submitted');
         const password = loginPasswordField.value.trim();
