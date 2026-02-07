@@ -84,6 +84,14 @@ jobs:
           workingDirectory: ./worker
           command: deploy --env staging
 
+      - name: Run D1 Migrations on Staging
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ./worker
+          command: d1 execute openclaw-taskboard-db --file=../migrations/add-cron-jobs.sql --env staging
+
   # Stage 3: Smoke Test Staging
   smoke-test-staging:
     name: Smoke Test Staging
@@ -167,6 +175,14 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
           command: deploy
+
+      - name: Run D1 Migrations on Production
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ./worker
+          command: d1 execute openclaw-taskboard-db --file=../migrations/add-cron-jobs.sql
 
       - name: Deploy Pages to Production
         uses: cloudflare/wrangler-action@v3
