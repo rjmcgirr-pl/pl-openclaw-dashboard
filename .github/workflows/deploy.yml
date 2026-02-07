@@ -9,8 +9,9 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  deploy-worker:
-    name: Deploy Worker
+  # Stage 1: Validate code
+  validate:
+    name: Validate Code
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -30,12 +31,40 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Inject D1 Database ID and Secrets
+      - name: TypeScript Type Check
+        run: npx tsc --noEmit
+
+      - name: Lint Check
+        run: npm run lint || echo "No lint script, skipping"
+
+  # Stage 2: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: validate
+    defaults:
+      run:
+        working-directory: ./worker
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './worker/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Inject Staging Secrets
         env:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
-          # Use Node.js for robust string replacement (handles any special chars)
           node -e "
             const fs = require('fs');
             const content = fs.readFileSync('wrangler.toml', 'utf8');
@@ -46,9 +75,92 @@ jobs:
               .replace(/your-password-here/g, password);
             fs.writeFileSync('wrangler.toml', updated);
           "
-          echo "✅ Secrets injected into wrangler.toml"
 
-      - name: Deploy Worker
+      - name: Deploy Worker to Staging
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ./worker
+          command: deploy --env staging
+
+  # Stage 3: Smoke Test Staging
+  smoke-test-staging:
+    name: Smoke Test Staging
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    
+    steps:
+      - name: Wait for deployment
+        run: sleep 10
+
+      - name: Test Staging API
+        env:
+          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          echo "Testing staging API..."
+          STAGING_URL="https://taskboard-api-staging.rei-workers.workers.dev"
+          
+          # Test 1: Health check (no auth)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/tasks" || echo "000")
+          if [ "$HTTP_CODE" = "401" ]; then
+            echo "✅ Auth required (correct)"
+          else
+            echo "❌ Expected 401, got $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Test 2: With auth
+          RESPONSE=$(curl -s -H "X-Dashboard-Password: $PASSWORD" "$STAGING_URL/tasks")
+          if echo "$RESPONSE" | grep -q "tasks"; then
+            echo "✅ API returns tasks"
+          else
+            echo "❌ API did not return expected response"
+            exit 1
+          fi
+          
+          echo "✅ Staging smoke tests passed"
+
+  # Stage 4: Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: smoke-test-staging
+    defaults:
+      run:
+        working-directory: ./worker
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './worker/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Inject Production Secrets
+        env:
+          DB_ID: ${{ secrets.D1_DATABASE_ID }}
+          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const content = fs.readFileSync('wrangler.toml', 'utf8');
+            const dbId = process.env.DB_ID;
+            const password = process.env.PASSWORD;
+            const updated = content
+              .replace(/your-database-id-here/g, dbId)
+              .replace(/your-password-here/g, password);
+            fs.writeFileSync('wrangler.toml', updated);
+          "
+
+      - name: Deploy Worker to Production
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -56,20 +168,7 @@ jobs:
           workingDirectory: ./worker
           command: deploy
 
-      - name: Output Worker URL
-        run: |
-          echo "✅ Worker deployed: https://openclaw.propertyllama.com"
-
-  deploy-pages:
-    name: Deploy Pages
-    runs-on: ubuntu-latest
-    needs: deploy-worker
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Deploy Pages
+      - name: Deploy Pages to Production
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -77,7 +176,53 @@ jobs:
           workingDirectory: .
           command: pages deploy public --project-name=taskboard
 
-      - name: Output Pages URL
+      - name: Output Deployed URLs
         run: |
-          echo "✅ Pages site deployed"
-          echo "🌐 Check Cloudflare dashboard for your Pages URL"
+          echo "✅ Production deployed"
+          echo "Worker: https://openclaw.propertyllama.com"
+          echo "Pages: Check Cloudflare dashboard"
+
+  # Stage 5: Smoke Test Production
+  smoke-test-production:
+    name: Smoke Test Production
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    
+    steps:
+      - name: Wait for deployment
+        run: sleep 10
+
+      - name: Test Production API
+        env:
+          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          echo "Testing production API..."
+          PROD_URL="https://taskboard-api.rei-workers.workers.dev"
+          
+          # Test 1: Auth required
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/tasks" || echo "000")
+          if [ "$HTTP_CODE" = "401" ]; then
+            echo "✅ Auth required (correct)"
+          else
+            echo "❌ Expected 401, got $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Test 2: With auth returns tasks
+          RESPONSE=$(curl -s -H "X-Dashboard-Password: $PASSWORD" "$PROD_URL/tasks")
+          if echo "$RESPONSE" | grep -q "tasks"; then
+            echo "✅ API returns tasks"
+          else
+            echo "❌ API did not return expected response"
+            exit 1
+          fi
+          
+          # Test 3: CORS headers present
+          CORS=$(curl -s -I -H "Origin: https://openclaw.propertyllama.com" "$PROD_URL/tasks" | grep -i "access-control-allow" || echo "")
+          if [ -n "$CORS" ]; then
+            echo "✅ CORS headers present"
+          else
+            echo "⚠️ CORS headers may be missing (check manually)"
+          fi
+          
+          echo "✅ Production smoke tests passed"

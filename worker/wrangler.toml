@@ -18,3 +18,8 @@ DASHBOARD_PASSWORD = "your-password-here"
 # For local development
 [env.local]
 vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-dev-password" }
+
+# Staging environment
+[env.staging]
+name = "taskboard-api-staging"
+vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here" }
