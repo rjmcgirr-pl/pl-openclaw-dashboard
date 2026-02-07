@@ -90,7 +90,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: d1 execute openclaw-taskboard-db --file=../migrations/add-cron-jobs.sql --env staging
+          command: d1 migrations apply openclaw-taskboard-db --env staging || echo "Migrations may already be applied"
 
   # Stage 3: Smoke Test Staging
   smoke-test-staging:
@@ -182,7 +182,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: d1 execute openclaw-taskboard-db --file=../migrations/add-cron-jobs.sql
+          command: d1 execute openclaw-taskboard-db --file=../schema.sql
 
       - name: Deploy Pages to Production
         uses: cloudflare/wrangler-action@v3

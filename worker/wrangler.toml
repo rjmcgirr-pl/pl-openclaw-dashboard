@@ -5,7 +5,7 @@ compatibility_date = "2024-12-30"
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
-database_name = "taskboard-db"
+database_name = "openclaw-taskboard-db"
 database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
 
 # KV Namespace for Cron Jobs (named pl-openclaw-dashboard in Cloudflare)
