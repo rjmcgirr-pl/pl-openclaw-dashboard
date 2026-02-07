@@ -146,6 +146,7 @@ The project includes a GitHub Actions workflow that automatically deploys both t
    |-------------|-------|
    | `CLOUDFLARE_API_TOKEN` | Your Cloudflare API token |
    | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID |
+   | `D1_DATABASE_ID` | Your D1 database ID (from `wrangler d1 create` output) |
 
 5. **Trigger Deployment:**
    - Push any change to the `main` branch
