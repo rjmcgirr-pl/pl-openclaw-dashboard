@@ -34,13 +34,17 @@ jobs:
         run: |
           sed -i "s/your-database-id-here/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
 
-      - name: Deploy Worker
+      - name: Deploy Worker (auto-creates if missing)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
           command: deploy
+
+      - name: Output Worker URL
+        run: |
+          echo "Worker deployed. Check Cloudflare dashboard for URL."
 
   deploy-pages:
     name: Deploy Pages
@@ -51,6 +55,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Create Pages Project (if not exists)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: .
+          command: pages project create taskboard --production-branch=main
+        continue-on-error: true  # Continue if project already exists
+
       - name: Deploy Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -58,3 +71,8 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: .
           command: pages deploy public --project-name=taskboard
+
+      - name: Output Pages URL
+        run: |
+          echo "Pages site deployed to: https://taskboard.pages.dev"
+          echo "(Or check Cloudflare dashboard for exact URL)"
