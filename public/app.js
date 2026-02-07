@@ -1,6 +1,23 @@
 // Task Board Frontend
 // Configure this to point to your Worker API
-const API_BASE_URL = ''; // Empty for same-origin, or set to your Worker URL
+// For Cloudflare Pages deployment, set this to your Worker URL:
+// const API_BASE_URL = 'https://taskboard-api.your-account.workers.dev';
+// 
+// Auto-detect: Uses same origin for local dev, or derives from hostname for Pages
+const API_BASE_URL = (() => {
+    // If running on pages.dev, construct the Worker URL
+    if (window.location.hostname.includes('pages.dev')) {
+        // Extract account subdomain from pages URL
+        // e.g., taskboard.your-account.pages.dev -> your-account
+        const parts = window.location.hostname.split('.');
+        if (parts.length >= 3) {
+            const account = parts[parts.length - 3]; // second-to-last before pages.dev
+            return `https://taskboard-api.${account}.workers.dev`;
+        }
+    }
+    // Default: same origin (for local development)
+    return '';
+})();
 
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
