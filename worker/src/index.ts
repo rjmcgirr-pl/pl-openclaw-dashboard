@@ -771,7 +771,6 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
     console.error('[endCronJob] Unexpected error:', error);
     return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
-  return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
 }
 
 async function listCronJobRuns(env: Env, id: number): Promise<Response> {
