@@ -320,10 +320,17 @@ async function deleteTask(env: Env, id: number): Promise<Response> {
 // Cron Job Functions
 
 async function listCronJobs(env: Env): Promise<Response> {
-  const { results } = await env.DB.prepare(
-    'SELECT * FROM cron_jobs ORDER BY created_at DESC'
-  ).all<CronJob>();
-  return jsonResponse({ cronJobs: results || [] });
+  try {
+    console.log('[listCronJobs] Querying cron_jobs table...');
+    const { results } = await env.DB.prepare(
+      'SELECT * FROM cron_jobs ORDER BY created_at DESC'
+    ).all<CronJob>();
+    console.log('[listCronJobs] Results:', results);
+    return jsonResponse({ cronJobs: results || [] });
+  } catch (error) {
+    console.error('[listCronJobs] Error:', error);
+    return errorResponse('Database error: ' + (error as Error).message, 500);
+  }
 }
 
 async function getCronJob(env: Env, id: number): Promise<Response> {
