@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Login modal with sessionStorage persistence
 - API authentication via `X-Dashboard-Password` header
 
+### Added
+- Branded header with logo (⚡ icon) and gradient styling
+- Animated logo with pulse effect
+
 ### Fixed
 - Use Node.js for secret injection (handles any special characters in passwords)
 - Add cache-busting headers and versioned assets to prevent stale code
