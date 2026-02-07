@@ -31,9 +31,14 @@ jobs:
         run: npm ci
 
       - name: Inject D1 Database ID and Secrets
+        env:
+          DB_ID: ${{ secrets.D1_DATABASE_ID }}
+          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
-          sed -i "s/your-database-id-here/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
-          sed -i "s/your-password-here/${{ secrets.DASHBOARD_PASSWORD }}/g" wrangler.toml
+          # Use different delimiters to avoid issues with special characters
+          sed -i "s#your-database-id-here#${DB_ID}#g" wrangler.toml
+          sed -i "s#your-password-here#${PASSWORD}#g" wrangler.toml
+          echo "✅ Secrets injected into wrangler.toml"
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
