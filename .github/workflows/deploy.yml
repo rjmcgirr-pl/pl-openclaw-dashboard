@@ -183,7 +183,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: d1 execute DB --file=../schema.sql --env production
+          command: d1 execute DB --file=../schema-clean.sql --env production
 
       - name: Deploy Pages to Production
         uses: cloudflare/wrangler-action@v3
