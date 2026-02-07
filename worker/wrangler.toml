@@ -27,3 +27,12 @@ vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-d
 [env.staging]
 name = "taskboard-api-staging"
 vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here" }
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "openclaw-taskboard-db"
+database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
+
+[[env.staging.kv_namespaces]]
+binding = "CRON_JOBS_KV"
+id = "dc82acf0e2dd40fd8f63e378d1b736be"
