@@ -37,6 +37,12 @@ export default {
       CORS_HEADERS['Access-Control-Allow-Origin'] = env.ALLOWED_ORIGIN;
     }
 
+    // Check password authentication
+    const providedPassword = request.headers.get('X-Dashboard-Password');
+    if (!providedPassword || providedPassword !== env.DASHBOARD_PASSWORD) {
+      return jsonResponse({ error: 'Unauthorized - Invalid or missing password' }, 401);
+    }
+
     try {
       // GET /tasks - List all tasks
       if (path === '/tasks' && method === 'GET') {

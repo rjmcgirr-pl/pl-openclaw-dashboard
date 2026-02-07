@@ -16,6 +16,7 @@ const STATUS_LABELS = {
 let tasks = [];
 let draggedTask = null;
 let autoRefreshInterval = null;
+let authPassword = sessionStorage.getItem('dashboardPassword') || '';
 
 // DOM Elements
 const newTaskBtn = document.getElementById('newTaskBtn');
@@ -24,6 +25,10 @@ const closeModalBtn = document.getElementById('closeModal');
 const taskForm = document.getElementById('taskForm');
 const deleteTaskBtn = document.getElementById('deleteTaskBtn');
 const modalTitle = document.getElementById('modalTitle');
+const loginModal = document.getElementById('loginModal');
+const loginForm = document.getElementById('loginForm');
+const loginPasswordField = document.getElementById('loginPassword');
+const loginError = document.getElementById('loginError');
 
 // Form fields
 const taskIdField = document.getElementById('taskId');
@@ -36,10 +41,26 @@ const taskAssignedField = document.getElementById('taskAssigned');
 
 // Initialize
 async function init() {
-    await loadTasks();
-    setupEventListeners();
-    setupDragAndDrop();
-    startAutoRefresh();
+    // Check if already authenticated
+    if (authPassword) {
+        loginModal.style.display = 'none';
+        await loadTasks();
+        setupEventListeners();
+        setupDragAndDrop();
+        startAutoRefresh();
+    } else {
+        showLogin();
+    }
+}
+
+function showLogin() {
+    loginModal.style.display = 'flex';
+    loginPasswordField.focus();
+}
+
+function hideLogin() {
+    loginModal.style.display = 'none';
+    loginError.style.display = 'none';
 }
 
 // API Functions
@@ -48,6 +69,7 @@ async function apiRequest(endpoint, options = {}) {
     const response = await fetch(url, {
         ...options,
         headers: {
+            'X-Dashboard-Password': authPassword,
             'Content-Type': 'application/json',
             ...options.headers,
         },
@@ -313,6 +335,33 @@ function closeModal() {
 
 // Event Listeners
 function setupEventListeners() {
+    // Login form
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const password = loginPasswordField.value.trim();
+        
+        if (!password) {
+            loginError.textContent = 'Please enter a password';
+            loginError.style.display = 'block';
+            return;
+        }
+        
+        // Test the password by making a request
+        authPassword = password;
+        try {
+            await loadTasks();
+            // Success - save password and show board
+            sessionStorage.setItem('dashboardPassword', password);
+            hideLogin();
+            setupDragAndDrop();
+            startAutoRefresh();
+        } catch (error) {
+            authPassword = '';
+            loginError.textContent = 'Invalid password. Please try again.';
+            loginError.style.display = 'block';
+        }
+    });
+    
     newTaskBtn.addEventListener('click', openNewModal);
     closeModalBtn.addEventListener('click', closeModal);
     deleteTaskBtn.addEventListener('click', () => {

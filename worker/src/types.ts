@@ -3,6 +3,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 export interface Env {
   DB: D1Database;
   ALLOWED_ORIGIN?: string;
+  DASHBOARD_PASSWORD: string;
 }
 
 export interface Task {

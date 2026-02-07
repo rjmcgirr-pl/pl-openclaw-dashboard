@@ -111,6 +111,25 @@
         </div>
     </div>
 
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal" style="display: flex;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔐 Login Required</h2>
+            </div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" required placeholder="Enter password">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Login</button>
+                </div>
+                <div id="loginError" class="error-message" style="display: none; color: #ff6b6b; margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

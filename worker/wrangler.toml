@@ -12,7 +12,9 @@ database_id = "your-database-id-here"  # Replace with your D1 database ID after 
 [vars]
 # Set this to your Cloudflare Pages domain in production
 # ALLOWED_ORIGIN = "https://taskboard.pages.dev"
+# Dashboard password - will be injected by GitHub Actions
+DASHBOARD_PASSWORD = "your-password-here"
 
 # For local development
 [env.local]
-vars = { ALLOWED_ORIGIN = "http://localhost:8788" }
+vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-dev-password" }
