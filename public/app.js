@@ -53,6 +53,9 @@ const taskAssignedField = document.getElementById('taskAssigned');
 async function init() {
     console.log('[Init] Starting dashboard...');
     
+    // ALWAYS set up event listeners first (including login form)
+    setupEventListeners();
+    
     // Check if password is required
     if (!dashboardPassword) {
         console.log('[Init] No password found, showing login modal');
@@ -65,7 +68,6 @@ async function init() {
         console.log('[Init] Checking stored password...');
         await loadTasks();
         await loadCronJobs();
-        setupEventListeners();
         setupDragAndDrop();
         setupCronEventListeners();
         startAutoRefresh();
@@ -115,7 +117,6 @@ async function handleLogin(password) {
         hideLoginModal();
         renderBoard();
         renderCronJobs();
-        setupEventListeners();
         setupDragAndDrop();
         setupCronEventListeners();
         startAutoRefresh();
