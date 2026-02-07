@@ -6,14 +6,18 @@ compatibility_date = "2024-12-30"
 [[d1_databases]]
 binding = "DB"
 database_name = "taskboard-db"
-database_id = "your-database-id-here"  # Replace with your D1 database ID after creation
+database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
+
+# KV Namespace for Cron Jobs (named pl-openclaw-dashboard in Cloudflare)
+[[kv_namespaces]]
+binding = "CRON_JOBS_KV"
+id = "dc82acf0e2dd40fd8f63e378d1b736be"
 
 # Environment variables
 [vars]
 # Set this to your Cloudflare Pages domain in production
 # ALLOWED_ORIGIN = "https://taskboard.pages.dev"
 # Dashboard password - will be injected by GitHub Actions
-DASHBOARD_PASSWORD = "your-password-here"
 
 # For local development
 [env.local]
