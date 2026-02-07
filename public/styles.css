@@ -49,19 +49,21 @@ header {
 .logo-icon {
     width: 48px;
     height: 48px;
-    background: linear-gradient(135deg, var(--accent-primary) 0%, #7c3aed 100%);
+    background: linear-gradient(135deg, #00f5ff 0%, #7c3aed 50%, #00f5ff 100%);
+    background-size: 200% 200%;
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 28px;
-    box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
-    animation: pulse 2s ease-in-out infinite;
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.4), 0 0 40px rgba(124, 58, 237, 0.2);
+    animation: neonShift 4s ease infinite;
 }
 
-@keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+@keyframes neonShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 
 .logo-text {
