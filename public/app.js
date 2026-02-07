@@ -41,14 +41,27 @@ const taskAssignedField = document.getElementById('taskAssigned');
 
 // Initialize
 async function init() {
+    console.log('Task Board Initializing...');
+    console.log('Auth password from sessionStorage:', authPassword ? 'Set (length: ' + authPassword.length + ')' : 'Not set');
+    
     // Check if already authenticated
     if (authPassword) {
+        console.log('Attempting auto-login with saved password...');
         loginModal.style.display = 'none';
-        await loadTasks();
-        setupEventListeners();
-        setupDragAndDrop();
-        startAutoRefresh();
+        try {
+            await loadTasks();
+            console.log('Auto-login successful');
+            setupEventListeners();
+            setupDragAndDrop();
+            startAutoRefresh();
+        } catch (error) {
+            console.error('Auto-login failed:', error);
+            authPassword = '';
+            sessionStorage.removeItem('dashboardPassword');
+            showLogin();
+        }
     } else {
+        console.log('No saved password, showing login form');
         showLogin();
     }
 }
@@ -338,7 +351,9 @@ function setupEventListeners() {
     // Login form
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        console.log('Login form submitted');
         const password = loginPasswordField.value.trim();
+        console.log('Password entered, length:', password.length);
         
         if (!password) {
             loginError.textContent = 'Please enter a password';
@@ -348,14 +363,17 @@ function setupEventListeners() {
         
         // Test the password by making a request
         authPassword = password;
+        console.log('Testing password with API...');
         try {
             await loadTasks();
             // Success - save password and show board
+            console.log('Login successful!');
             sessionStorage.setItem('dashboardPassword', password);
             hideLogin();
             setupDragAndDrop();
             startAutoRefresh();
         } catch (error) {
+            console.error('Login failed:', error);
             authPassword = '';
             loginError.textContent = 'Invalid password. Please try again.';
             loginError.style.display = 'block';
