@@ -154,6 +154,11 @@ export default {
         return await listCronJobRuns(env, cronJobId);
       }
 
+      // POST /cron-jobs/sync - Full sync (delete all, insert new)
+      if (path === '/cron-jobs/sync' && method === 'POST') {
+        return await syncCronJobs(env, request);
+      }
+
       return errorResponse('Not found', 404);
     } catch (error) {
       console.error('Error handling request:', error);
@@ -505,4 +510,42 @@ async function listCronJobRuns(env: Env, id: number): Promise<Response> {
   ).bind(id).all<CronJobRun>();
 
   return jsonResponse({ runs: results || [] });
+}
+
+async function syncCronJobs(env: Env, request: Request): Promise<Response> {
+  const body = await request.json() as { cronJobs: CreateCronJobRequest[] };
+  
+  if (!body.cronJobs || !Array.isArray(body.cronJobs)) {
+    return errorResponse('Invalid request: cronJobs array required');
+  }
+
+  // Delete all existing cron jobs and runs
+  await env.DB.prepare('DELETE FROM cron_job_runs').run();
+  await env.DB.prepare('DELETE FROM cron_jobs').run();
+
+  // Insert new cron jobs
+  const inserted: CronJob[] = [];
+  for (const job of body.cronJobs) {
+    const result = await env.DB.prepare(
+      `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, last_status) 
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(
+      job.name,
+      job.description || null,
+      job.schedule,
+      job.skill_md_path || null,
+      job.last_status || 'pending'
+    ).run();
+
+    const newJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?')
+      .bind(result.meta.last_row_id)
+      .first<CronJob>();
+    if (newJob) inserted.push(newJob);
+  }
+
+  return jsonResponse({ 
+    message: 'Cron jobs synced', 
+    count: inserted.length,
+    cronJobs: inserted 
+  }, 201);
 }
