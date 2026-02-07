@@ -35,9 +35,10 @@ jobs:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
-          # Use different delimiters to avoid issues with special characters
-          sed -i "s#your-database-id-here#${DB_ID}#g" wrangler.toml
-          sed -i "s#your-password-here#${PASSWORD}#g" wrangler.toml
+          # Use @ as delimiter (safe for this password)
+          sed -i "s@your-database-id-here@${DB_ID}@g" wrangler.toml
+          # Use single quotes and concatenation to preserve special chars
+          sed -i 's@your-password-here@'"${PASSWORD}"'@g' wrangler.toml
           echo "✅ Secrets injected into wrangler.toml"
 
       - name: Deploy Worker
