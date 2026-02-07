@@ -538,7 +538,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
     ).run();
 
     const newJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?')
-      .bind(result.meta.last_row_id)
+      .bind(result.meta.last_row_id as number)
       .first<CronJob>();
     if (newJob) inserted.push(newJob);
   }
