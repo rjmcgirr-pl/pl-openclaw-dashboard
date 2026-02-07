@@ -37,12 +37,13 @@ export default {
       CORS_HEADERS['Access-Control-Allow-Origin'] = env.ALLOWED_ORIGIN;
     }
 
-    // Debug endpoint to check auth setup
+    // Debug endpoint to check auth setup (NO AUTH REQUIRED)
     if (path === '/debug' && method === 'GET') {
       const providedPassword = request.headers.get('X-Dashboard-Password');
       return jsonResponse({
         env_password_set: !!env.DASHBOARD_PASSWORD,
         env_password_length: env.DASHBOARD_PASSWORD ? env.DASHBOARD_PASSWORD.length : 0,
+        env_password_preview: env.DASHBOARD_PASSWORD ? env.DASHBOARD_PASSWORD.substring(0, 3) + '***' : null,
         header_password_provided: !!providedPassword,
         header_password_length: providedPassword ? providedPassword.length : 0,
         match: providedPassword === env.DASHBOARD_PASSWORD,
