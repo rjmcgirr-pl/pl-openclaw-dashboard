@@ -1,6 +1,6 @@
 // Task Board Frontend
 // Configure this to point to your Worker API
-const API_BASE_URL = 'https://taskboard-api.rei-workers.workers.dev';
+const API_BASE_URL = ''; // Empty for same-origin, or set to your Worker URL
 
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
@@ -12,11 +12,24 @@ const STATUS_LABELS = {
     done: '✅ Done'
 };
 
+// Cron job status configuration
+const CRON_STATUSES = ['pending', 'running', 'done', 'error', 'stalled'];
+const CRON_STATUS_LABELS = {
+    pending: '⏸️ Pending',
+    running: '🔄 Running',
+    done: '✅ Done',
+    error: '❌ Error',
+    stalled: '⚠️ Stalled'
+};
+
 // State
 let tasks = [];
+let cronJobs = [];
 let draggedTask = null;
 let autoRefreshInterval = null;
-let authPassword = sessionStorage.getItem('dashboardPassword') || '';
+let cronRefreshInterval = null;
+let dashboardPassword = sessionStorage.getItem('dashboardPassword') || '';
+let currentTab = 'tasks';
 
 // DOM Elements
 const newTaskBtn = document.getElementById('newTaskBtn');
@@ -25,10 +38,6 @@ const closeModalBtn = document.getElementById('closeModal');
 const taskForm = document.getElementById('taskForm');
 const deleteTaskBtn = document.getElementById('deleteTaskBtn');
 const modalTitle = document.getElementById('modalTitle');
-const loginModal = document.getElementById('loginModal');
-const loginForm = document.getElementById('loginForm');
-const loginPasswordField = document.getElementById('loginPassword');
-const loginError = document.getElementById('loginError');
 
 // Form fields
 const taskIdField = document.getElementById('taskId');
@@ -41,56 +50,110 @@ const taskAssignedField = document.getElementById('taskAssigned');
 
 // Initialize
 async function init() {
-    console.log('Task Board Initializing...');
-    console.log('Auth password from sessionStorage:', authPassword ? 'Set (length: ' + authPassword.length + ')' : 'Not set');
+    // Check if password is required
+    if (!dashboardPassword) {
+        showLoginModal();
+        return;
+    }
     
-    // ALWAYS set up event listeners first (including login form)
-    setupEventListeners();
-    
-    // Check if already authenticated
-    if (authPassword) {
-        console.log('Attempting auto-login with saved password...');
-        loginModal.style.display = 'none';
-        try {
-            await loadTasks();
-            console.log('Auto-login successful');
-            setupDragAndDrop();
-            startAutoRefresh();
-        } catch (error) {
-            console.error('Auto-login failed:', error);
-            authPassword = '';
-            sessionStorage.removeItem('dashboardPassword');
-            showLogin();
+    // Verify password works by loading tasks
+    try {
+        await loadTasks();
+        await loadCronJobs();
+        setupEventListeners();
+        setupDragAndDrop();
+        setupCronEventListeners();
+        startAutoRefresh();
+        startCronAutoRefresh();
+        
+        // Show logout button
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.style.display = 'block';
         }
-    } else {
-        console.log('No saved password, showing login form');
-        showLogin();
+    } catch (error) {
+        // If auth failed, login modal will be shown by apiRequest
+        console.log('Auth check failed, showing login');
     }
 }
 
-function showLogin() {
-    loginModal.style.display = 'flex';
-    loginPasswordField.focus();
+// Login Modal Functions
+function showLoginModal() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.add('active');
+    }
 }
 
-function hideLogin() {
-    loginModal.style.display = 'none';
-    loginError.style.display = 'none';
+function hideLoginModal() {
+    const modal = document.getElementById('loginModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function handleLogin(password) {
+    dashboardPassword = password;
+    
+    try {
+        // Test the password by loading tasks
+        const data = await apiRequest('/tasks');
+        tasks = data.tasks || [];
+        
+        // Also load cron jobs
+        await loadCronJobs();
+        
+        // Save password to sessionStorage
+        sessionStorage.setItem('dashboardPassword', password);
+        
+        hideLoginModal();
+        renderBoard();
+        renderCronJobs();
+        setupEventListeners();
+        setupDragAndDrop();
+        setupCronEventListeners();
+        startAutoRefresh();
+        startCronAutoRefresh();
+        
+        // Show logout button
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.style.display = 'block';
+        }
+        
+        return true;
+    } catch (error) {
+        dashboardPassword = '';
+        return false;
+    }
 }
 
 // API Functions
 async function apiRequest(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+    
+    // Add password header if available
+    if (dashboardPassword) {
+        headers['X-Dashboard-Password'] = dashboardPassword;
+    }
+    
     const response = await fetch(url, {
         ...options,
-        headers: {
-            'X-Dashboard-Password': authPassword,
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
+        headers,
     });
     
     if (!response.ok) {
+        // Handle 401 Unauthorized - show login modal
+        if (response.status === 401) {
+            dashboardPassword = '';
+            sessionStorage.removeItem('dashboardPassword');
+            showLoginModal();
+            throw new Error('Authentication required. Please enter the password.');
+        }
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
         throw new Error(error.error || `HTTP ${response.status}`);
     }
@@ -350,48 +413,6 @@ function closeModal() {
 
 // Event Listeners
 function setupEventListeners() {
-    console.log('Setting up event listeners...');
-    console.log('loginForm element:', loginForm);
-    console.log('loginPasswordField element:', loginPasswordField);
-    
-    // Login form
-    if (!loginForm) {
-        console.error('ERROR: loginForm element not found!');
-        return;
-    }
-    
-    loginForm.addEventListener('submit', async (e) => {
-        console.log('LOGIN FORM SUBMIT FIRED!');
-        e.preventDefault();
-        console.log('Login form submitted');
-        const password = loginPasswordField.value.trim();
-        console.log('Password entered, length:', password.length);
-        
-        if (!password) {
-            loginError.textContent = 'Please enter a password';
-            loginError.style.display = 'block';
-            return;
-        }
-        
-        // Test the password by making a request
-        authPassword = password;
-        console.log('Testing password with API...');
-        try {
-            await loadTasks();
-            // Success - save password and show board
-            console.log('Login successful!');
-            sessionStorage.setItem('dashboardPassword', password);
-            hideLogin();
-            setupDragAndDrop();
-            startAutoRefresh();
-        } catch (error) {
-            console.error('Login failed:', error);
-            authPassword = '';
-            loginError.textContent = 'Invalid password. Please try again.';
-            loginError.style.display = 'block';
-        }
-    });
-    
     newTaskBtn.addEventListener('click', openNewModal);
     closeModalBtn.addEventListener('click', closeModal);
     deleteTaskBtn.addEventListener('click', () => {
@@ -422,6 +443,41 @@ function setupEventListeners() {
             await createTask(taskData);
         }
     });
+
+    // Login form
+    const loginForm = document.getElementById('loginForm');
+    const loginPasswordField = document.getElementById('loginPassword');
+    const loginErrorDiv = document.getElementById('loginError');
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loginErrorDiv.style.display = 'none';
+            loginErrorDiv.textContent = '';
+
+            const password = loginPasswordField.value;
+            const success = await handleLogin(password);
+
+            if (!success) {
+                loginErrorDiv.textContent = 'Invalid password. Please try again.';
+                loginErrorDiv.style.display = 'block';
+                loginPasswordField.value = '';
+                loginPasswordField.focus();
+            }
+        });
+    }
+
+    // Logout button
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            dashboardPassword = '';
+            sessionStorage.removeItem('dashboardPassword');
+            stopAutoRefresh();
+            stopCronAutoRefresh();
+            location.reload();
+        });
+    }
 }
 
 // Auto-refresh
@@ -457,6 +513,292 @@ function showError(message) {
     // Could show a toast notification here
     alert(message);
 }
+
+// Cron Job Functions
+
+async function loadCronJobs() {
+    try {
+        const data = await apiRequest('/cron-jobs');
+        cronJobs = data.cronJobs || [];
+        renderCronJobs();
+    } catch (error) {
+        showError('Failed to load cron jobs: ' + error.message);
+    }
+}
+
+function renderCronJobs() {
+    const container = document.getElementById('cronJobsList');
+    
+    // Update stats
+    const stats = {
+        total: cronJobs.length,
+        done: cronJobs.filter(j => j.last_status === 'done').length,
+        running: cronJobs.filter(j => j.last_status === 'running').length,
+        error: cronJobs.filter(j => j.last_status === 'error' || j.last_status === 'stalled').length
+    };
+    
+    document.getElementById('cronTotal').textContent = stats.total;
+    document.getElementById('cronDone').textContent = stats.done;
+    document.getElementById('cronRunning').textContent = stats.running;
+    document.getElementById('cronError').textContent = stats.error;
+    
+    if (cronJobs.length === 0) {
+        container.innerHTML = `
+            <div class="cron-empty-state">
+                <div class="cron-empty-state-icon">⏰</div>
+                <h3>No Cron Jobs</h3>
+                <p>Create your first cron job to start monitoring</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by status (running/error first), then by last run time
+    const sortedJobs = [...cronJobs].sort((a, b) => {
+        const statusPriority = { running: 0, stalled: 1, error: 2, pending: 3, done: 4 };
+        const aPriority = statusPriority[a.last_status] ?? 5;
+        const bPriority = statusPriority[b.last_status] ?? 5;
+        
+        if (aPriority !== bPriority) {
+            return aPriority - bPriority;
+        }
+        
+        // Sort by last run time (most recent first)
+        const aTime = a.last_run_at ? new Date(a.last_run_at) : new Date(0);
+        const bTime = b.last_run_at ? new Date(b.last_run_at) : new Date(0);
+        return bTime - aTime;
+    });
+    
+    container.innerHTML = sortedJobs.map(job => createCronJobCard(job)).join('');
+    
+    // Add click handlers for expansion
+    container.querySelectorAll('.cron-job-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const card = header.closest('.cron-job-card');
+            card.classList.toggle('expanded');
+        });
+    });
+}
+
+function createCronJobCard(job) {
+    const statusLabel = CRON_STATUS_LABELS[job.last_status] || job.last_status;
+    const lastRun = job.last_run_at ? formatDate(job.last_run_at) : 'Never';
+    const nextRun = job.next_run_at ? formatDate(job.next_run_at) : 'Not scheduled';
+    
+    return `
+        <div class="cron-job-card" data-cron-id="${job.id}">
+            <div class="cron-job-header">
+                <div class="cron-job-main">
+                    <div class="cron-job-status ${job.last_status}"></div>
+                    <div class="cron-job-info">
+                        <div class="cron-job-name">${escapeHtml(job.name)}</div>
+                        <div class="cron-job-meta">
+                            <span>⏱️ ${escapeHtml(job.schedule)}</span>
+                            <span>🕐 Last: ${lastRun}</span>
+                            ${job.skill_md_path ? `<span>📄 <a href="${escapeHtml(job.skill_md_path)}" target="_blank">skill.md</a></span>` : ''}
+                        </div>
+                    </div>
+                    <span class="cron-job-badge ${job.last_status}">${statusLabel}</span>
+                </div>
+                <span class="cron-job-chevron">▼</span>
+            </div>
+            <div class="cron-job-details">
+                ${job.description ? `<div class="cron-job-description">${escapeHtml(job.description)}</div>` : ''}
+                <div class="cron-job-output">${job.last_output ? escapeHtml(job.last_output) : ''}</div>
+                <div class="cron-job-actions">
+                    <button class="btn-secondary" onclick="editCronJob(${job.id})">Edit</button>
+                    <button class="btn-primary" onclick="runCronJob(${job.id})">Run Now</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function createCronJob(cronJobData) {
+    try {
+        const data = await apiRequest('/cron-jobs', {
+            method: 'POST',
+            body: JSON.stringify(cronJobData),
+        });
+        await loadCronJobs();
+        closeCronModal();
+        return data.cronJob;
+    } catch (error) {
+        showError('Failed to create cron job: ' + error.message);
+    }
+}
+
+async function updateCronJob(id, cronJobData) {
+    try {
+        const data = await apiRequest(`/cron-jobs/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(cronJobData),
+        });
+        await loadCronJobs();
+        closeCronModal();
+        return data.cronJob;
+    } catch (error) {
+        showError('Failed to update cron job: ' + error.message);
+    }
+}
+
+async function deleteCronJob(id) {
+    if (!confirm('Are you sure you want to delete this cron job?')) {
+        return;
+    }
+    
+    try {
+        await apiRequest(`/cron-jobs/${id}`, {
+            method: 'DELETE',
+        });
+        await loadCronJobs();
+        closeCronModal();
+    } catch (error) {
+        showError('Failed to delete cron job: ' + error.message);
+    }
+}
+
+async function runCronJob(id) {
+    try {
+        await apiRequest(`/cron-jobs/${id}/start`, {
+            method: 'POST',
+        });
+        showError('Cron job started manually');
+        await loadCronJobs();
+    } catch (error) {
+        showError('Failed to start cron job: ' + error.message);
+    }
+}
+
+// Tab Functions
+function switchTab(tabName) {
+    currentTab = tabName;
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    document.getElementById(tabName + 'Tab').classList.add('active');
+}
+
+// Cron Modal Functions
+function openNewCronModal() {
+    document.getElementById('cronModalTitle').textContent = 'New Cron Job';
+    document.getElementById('cronJobForm').reset();
+    document.getElementById('cronJobId').value = '';
+    document.getElementById('deleteCronJobBtn').style.display = 'none';
+    document.getElementById('cronJobModal').classList.add('active');
+}
+
+function editCronJob(id) {
+    const job = cronJobs.find(j => j.id === id);
+    if (!job) return;
+    
+    document.getElementById('cronModalTitle').textContent = 'Edit Cron Job';
+    document.getElementById('cronJobId').value = job.id;
+    document.getElementById('cronJobName').value = job.name;
+    document.getElementById('cronJobDescription').value = job.description || '';
+    document.getElementById('cronJobSchedule').value = job.schedule;
+    document.getElementById('cronJobSkillPath').value = job.skill_md_path || '';
+    document.getElementById('deleteCronJobBtn').style.display = 'block';
+    document.getElementById('cronJobModal').classList.add('active');
+}
+
+function closeCronModal() {
+    document.getElementById('cronJobModal').classList.remove('active');
+}
+
+// Cron Event Listeners
+function setupCronEventListeners() {
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchTab(btn.dataset.tab);
+        });
+    });
+    
+    // New cron job button
+    const newCronJobBtn = document.getElementById('newCronJobBtn');
+    if (newCronJobBtn) {
+        newCronJobBtn.addEventListener('click', openNewCronModal);
+    }
+    
+    // Close cron modal
+    const closeCronModalBtn = document.getElementById('closeCronModal');
+    if (closeCronModalBtn) {
+        closeCronModalBtn.addEventListener('click', closeCronModal);
+    }
+    
+    // Cron job form
+    const cronJobForm = document.getElementById('cronJobForm');
+    if (cronJobForm) {
+        cronJobForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const cronJobData = {
+                name: document.getElementById('cronJobName').value.trim(),
+                description: document.getElementById('cronJobDescription').value.trim() || undefined,
+                schedule: document.getElementById('cronJobSchedule').value.trim(),
+                skill_md_path: document.getElementById('cronJobSkillPath').value.trim() || undefined,
+            };
+
+            const id = document.getElementById('cronJobId').value;
+            if (id) {
+                await updateCronJob(parseInt(id, 10), cronJobData);
+            } else {
+                await createCronJob(cronJobData);
+            }
+        });
+    }
+    
+    // Delete cron job button
+    const deleteCronJobBtn = document.getElementById('deleteCronJobBtn');
+    if (deleteCronJobBtn) {
+        deleteCronJobBtn.addEventListener('click', () => {
+            const id = parseInt(document.getElementById('cronJobId').value, 10);
+            if (id) deleteCronJob(id);
+        });
+    }
+    
+    // Refresh cron jobs button
+    const refreshCronBtn = document.getElementById('refreshCronBtn');
+    if (refreshCronBtn) {
+        refreshCronBtn.addEventListener('click', loadCronJobs);
+    }
+    
+    // Close modal on backdrop click
+    const cronJobModal = document.getElementById('cronJobModal');
+    if (cronJobModal) {
+        cronJobModal.addEventListener('click', (e) => {
+            if (e.target === cronJobModal) closeCronModal();
+        });
+    }
+}
+
+function startCronAutoRefresh() {
+    // Refresh every 30 seconds
+    cronRefreshInterval = setInterval(() => {
+        if (currentTab === 'cron') {
+            loadCronJobs();
+        }
+    }, 30000);
+}
+
+function stopCronAutoRefresh() {
+    if (cronRefreshInterval) {
+        clearInterval(cronRefreshInterval);
+        cronRefreshInterval = null;
+    }
+}
+
+// Make functions available globally for inline onclick handlers
+window.editCronJob = editCronJob;
+window.runCronJob = runCronJob;
 
 // Start the app
 init();

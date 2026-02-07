@@ -3,25 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
     <title>Task Board</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <div class="logo-area">
-                <div class="logo-icon">⚡</div>
-                <div class="logo-text">
-                    <h1>Clawdbot Task Board</h1>
-                    <span class="tagline">AI Agent Mission Control</span>
-                </div>
+            <h1>📋 Task Board</h1>
+            <div class="header-actions">
+                <button id="logoutBtn" class="btn-secondary" style="display: none;">Logout</button>
+                <button id="newTaskBtn" class="btn-primary">+ New Task</button>
             </div>
-            <button id="newTaskBtn" class="btn-primary">+ New Task</button>
         </header>
 
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="tasks">📋 Tasks</button>
+            <button class="tab-btn" data-tab="cron">⏰ Cron Monitor</button>
+        </nav>
+
+        <!-- Tasks Tab -->
+        <div id="tasksTab" class="tab-content active">
         <div class="board">
             <div class="column" data-status="inbox">
                 <div class="column-header">
@@ -61,6 +63,38 @@
                     <span class="column-count" id="count-done">0</span>
                 </div>
                 <div class="column-tasks" id="col-done"></div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Cron Monitor Tab -->
+        <div id="cronTab" class="tab-content">
+            <div class="cron-header">
+                <div class="cron-stats">
+                    <div class="stat-card">
+                        <span class="stat-value" id="cronTotal">0</span>
+                        <span class="stat-label">Total Jobs</span>
+                    </div>
+                    <div class="stat-card success">
+                        <span class="stat-value" id="cronDone">0</span>
+                        <span class="stat-label">Done</span>
+                    </div>
+                    <div class="stat-card warning">
+                        <span class="stat-value" id="cronRunning">0</span>
+                        <span class="stat-label">Running</span>
+                    </div>
+                    <div class="stat-card danger">
+                        <span class="stat-value" id="cronError">0</span>
+                        <span class="stat-label">Error/Stalled</span>
+                    </div>
+                </div>
+                <div class="cron-actions">
+                    <button id="refreshCronBtn" class="btn-secondary">🔄 Refresh</button>
+                    <button id="newCronJobBtn" class="btn-primary">+ New Cron Job</button>
+                </div>
+            </div>
+            <div class="cron-jobs-list" id="cronJobsList">
+                <!-- Cron jobs will be rendered here -->
             </div>
         </div>
     </div>
@@ -120,25 +154,60 @@
         </div>
     </div>
 
-    <!-- Login Modal -->
-    <div id="loginModal" class="modal" style="display: flex;">
+    <!-- Cron Job Modal -->
+    <div id="cronJobModal" class="modal">
         <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="cronModalTitle">New Cron Job</h2>
+                <button class="close-btn" id="closeCronModal">&times;</button>
+            </div>
+            <form id="cronJobForm">
+                <input type="hidden" id="cronJobId">
+                <div class="form-group">
+                    <label for="cronJobName">Name *</label>
+                    <input type="text" id="cronJobName" required placeholder="e.g., Daily Backup">
+                </div>
+                <div class="form-group">
+                    <label for="cronJobDescription">Description</label>
+                    <textarea id="cronJobDescription" rows="2" placeholder="What does this cron job do?"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="cronJobSchedule">Schedule *</label>
+                    <input type="text" id="cronJobSchedule" required placeholder="e.g., 0 9 * * * (cron expression)">
+                    <span class="form-hint">Cron expression: minute hour day month weekday</span>
+                </div>
+                <div class="form-group">
+                    <label for="cronJobSkillPath">Skill MD Path</label>
+                    <input type="text" id="cronJobSkillPath" placeholder="e.g., skills/backup.md">
+                    <span class="form-hint">Optional path to the skill documentation</span>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="deleteCronJobBtn" class="btn-danger" style="display: none;">Delete</button>
+                    <button type="submit" class="btn-primary">Save Cron Job</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal">
+        <div class="modal-content login-modal">
             <div class="modal-header">
                 <h2>🔐 Login Required</h2>
             </div>
             <form id="loginForm">
                 <div class="form-group">
                     <label for="loginPassword">Password</label>
-                    <input type="password" id="loginPassword" required placeholder="Enter password">
+                    <input type="password" id="loginPassword" required placeholder="Enter dashboard password" autocomplete="off">
                 </div>
+                <div id="loginError" class="login-error" style="display: none;"></div>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">Login</button>
                 </div>
-                <div id="loginError" class="error-message" style="display: none; color: #ff6b6b; margin-top: 10px;"></div>
             </form>
         </div>
     </div>
 
-    <script src="app.js?v=2"></script>
+    <script src="app.js"></script>
 </body>
 </html>
