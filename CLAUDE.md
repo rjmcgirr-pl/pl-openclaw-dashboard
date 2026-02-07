@@ -6,6 +6,10 @@ This file helps AI assistants (Claude, etc.) understand and work with this proje
 
 **PL OpenClaw Dashboard** is a password-protected task board for managing AI agent tasks. It replaces external services like ClawDeck with a self-hosted Cloudflare solution.
 
+**Production URLs:**
+- **Dashboard:** https://openclaw.propertyllama.com
+- **API:** https://taskboard-api.rei-workers.workers.dev
+
 ### Key Design Decisions
 
 1. **Cloudflare-native** — Workers + D1 + Pages for zero server maintenance
@@ -16,14 +20,17 @@ This file helps AI assistants (Claude, etc.) understand and work with this proje
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Cloudflare     │────▶│  Cloudflare     │────▶│  Cloudflare D1  │
-│  Pages          │     │  Worker         │     │  (SQLite)       │
-│  (Frontend)     │◄────│  (API)          │◄────│  (Tasks data)   │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-       │
-       ▼
-  User with password
+┌─────────────────┐         ┌─────────────────┐     ┌─────────────────┐
+│  Cloudflare     │────────▶│  Cloudflare     │────▶│  Cloudflare D1  │
+│  Pages          │         │  Worker         │     │  (SQLite)       │
+│  (Frontend)     │         │  (API)          │     │  (Tasks data)   │
+│  openclaw.      │         │  taskboard-api. │     │                 │
+│  propertyllama  │         │  rei-workers.dev│     │                 │
+└─────────────────┘         └─────────────────┘     └─────────────────┘
+       │                           ▲
+       │   X-Dashboard-Password    │
+       └───────────────────────────┘
+              User with password
 ```
 
 ## Common Tasks

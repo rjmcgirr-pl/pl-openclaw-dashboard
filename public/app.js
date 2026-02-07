@@ -1,8 +1,7 @@
 // Task Board Frontend
 // Configure this to point to your Worker API
-// In production with custom domain, this should be empty (same-origin)
-// For separate Worker/Pages deployments, set this to your Worker URL
-const API_BASE_URL = window.API_BASE_URL || ''; // Can be overridden via window.API_BASE_URL
+// Production API URL - change this if your Worker is on a different domain
+const API_BASE_URL = window.API_BASE_URL || 'https://taskboard-api.rei-workers.workers.dev';
 
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];

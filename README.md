@@ -25,6 +25,9 @@ A secure, full-stack task management board built with Cloudflare Workers, D1 (SQ
 | Backend | Cloudflare Worker | https://taskboard-api.rei-workers.workers.dev |
 | Database | Cloudflare D1 (SQLite) | openclaw-taskboard-db |
 
+**Production Site:** https://openclaw.propertyllama.com  
+**API Endpoint:** https://taskboard-api.rei-workers.workers.dev
+
 ## Quick Start
 
 ### Prerequisites
