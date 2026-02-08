@@ -53,6 +53,9 @@ const taskAssignedField = document.getElementById('taskAssigned');
 // Initialize
 async function init() {
     console.log('[Init] Starting dashboard...');
+    const debugInit = document.getElementById('debugInitCalled');
+    const debugAuth = document.getElementById('debugAuthCheck');
+    if (debugInit) debugInit.textContent = 'Init: Called ✓';
     
     // ALWAYS set up event listeners first (including OAuth handlers)
     setupEventListeners();
@@ -61,6 +64,8 @@ async function init() {
     // Check if user is authenticated
     try {
         console.log('[Init] Checking session...');
+        if (debugAuth) debugAuth.textContent = 'Auth: Fetching /auth/me...';
+        
         const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
             credentials: 'include'
         });
@@ -69,16 +74,20 @@ async function init() {
             const data = await meResponse.json();
             currentUser = data.user;
             console.log('[Init] User authenticated:', currentUser.name);
+            if (debugAuth) debugAuth.textContent = 'Auth: Logged in ✓';
             await initializeDashboard();
         } else if (meResponse.status === 401) {
             console.log('[Init] No active session, showing login modal');
+            if (debugAuth) debugAuth.textContent = 'Auth: Not logged in (401)';
             showLoginModal();
         } else {
             console.log('[Init] Auth check returned:', meResponse.status);
+            if (debugAuth) debugAuth.textContent = `Auth: Error ${meResponse.status}`;
             showLoginModal();
         }
     } catch (error) {
         console.error('[Init] Auth check failed:', error.message);
+        if (debugAuth) debugAuth.textContent = `Auth: Network Error - ${error.message}`;
         // Network error or API unavailable - still show login
         showLoginModal();
     }
@@ -1389,10 +1398,31 @@ function showToast(message, type = 'info') {
 window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
 window.openMarkdownEditor = openMarkdownEditor;
+window.initiateGoogleAuth = initiateGoogleAuth;
+
+// Debug: Add visible status to page
+function addDebugStatus() {
+    const debugDiv = document.createElement('div');
+    debugDiv.id = 'debugStatus';
+    debugDiv.style.cssText = 'position:fixed;bottom:10px;right:10px;background:#333;color:#fff;padding:10px;border-radius:4px;font-size:12px;z-index:9999;max-width:300px;';
+    debugDiv.innerHTML = `
+        <div><strong>Debug Status</strong></div>
+        <div id="debugApiUrl">API: ${API_BASE_URL}</div>
+        <div id="debugScriptLoaded">Script: Loaded ✓</div>
+        <div id="debugInitCalled">Init: Waiting...</div>
+        <div id="debugAuthCheck">Auth: Checking...</div>
+        <div id="debugButton">Button: ${document.getElementById('googleLoginBtn') ? 'Found ✓' : 'NOT FOUND ✗'}</div>
+    `;
+    document.body.appendChild(debugDiv);
+}
 
 // Start the app when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => {
+        addDebugStatus();
+        init();
+    });
 } else {
+    addDebugStatus();
     init();
 }
