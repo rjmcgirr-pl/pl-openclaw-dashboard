@@ -102,7 +102,7 @@ function updateUserUI() {
     }
 }
 
-// Login Modal Functions
+// OAuth / Login Functions
 function showLoginModal() {
     const modal = document.getElementById('loginModal');
     if (modal) {
@@ -117,42 +117,62 @@ function hideLoginModal() {
     }
 }
 
-async function handleLogin(password) {
-    dashboardPassword = password;
+let oauthPopup = null;
+
+function initiateGoogleAuth() {
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
     
-    try {
-        // Test the password by loading tasks
-        const data = await apiRequest('/tasks');
-        tasks = data.tasks || [];
-        
-        // Also load cron jobs
-        await loadCronJobs();
-        
-        // Save password to sessionStorage
-        sessionStorage.setItem('dashboardPassword', password);
-        
-        hideLoginModal();
-        renderBoard();
-        renderCronJobs();
-        setupDragAndDrop();
-        setupCronEventListeners();
-        startAutoRefresh();
-        startCronAutoRefresh();
-        
-        // Show logout button
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) {
-            logoutBtn.style.display = 'block';
+    oauthPopup = window.open(
+        `${API_BASE_URL}/auth/google`,
+        'googleOAuth',
+        `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,location=no,status=no`
+    );
+}
+
+function setupOAuthListeners() {
+    // Listen for OAuth messages from popup
+    window.addEventListener('message', async (event) => {
+        // Verify the message is from our API
+        const apiUrl = new URL(API_BASE_URL);
+        if (event.origin !== `${apiUrl.protocol}//${apiUrl.host}`) {
+            return;
         }
-        
-        return true;
+
+        if (event.data.type === 'oauth-success') {
+            console.log('[OAuth] Login successful');
+            currentUser = event.data.user;
+            hideLoginModal();
+            await initializeDashboard();
+            if (oauthPopup && !oauthPopup.closed) {
+                oauthPopup.close();
+            }
+        } else if (event.data.type === 'oauth-error') {
+            console.error('[OAuth] Login failed:', event.data.error);
+            showError('Login failed: ' + event.data.error);
+            if (oauthPopup && !oauthPopup.closed) {
+                oauthPopup.close();
+            }
+        }
+    });
+}
+
+async function handleLogout() {
+    try {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
     } catch (error) {
-        // Clear the password on failure
-        dashboardPassword = '';
-        sessionStorage.removeItem('dashboardPassword');
-        console.error('Login failed:', error.message);
-        return false;
+        console.error('Logout error:', error);
     }
+    
+    currentUser = null;
+    stopAutoRefresh();
+    stopCronAutoRefresh();
+    location.reload();
 }
 
 // API Functions
@@ -165,16 +185,12 @@ async function apiRequest(endpoint, options = {}) {
         ...options.headers,
     };
     
-    // Add password header if available
-    if (dashboardPassword) {
-        headers['X-Dashboard-Password'] = dashboardPassword;
-    }
-    
     let response;
     try {
         response = await fetch(url, {
             ...options,
             headers,
+            credentials: 'include', // Include cookies for session
         });
     } catch (networkError) {
         // Network error (CORS, offline, DNS failure, etc.)
@@ -187,10 +203,9 @@ async function apiRequest(endpoint, options = {}) {
     if (!response.ok) {
         // Handle 401 Unauthorized - show login modal
         if (response.status === 401) {
-            dashboardPassword = '';
-            sessionStorage.removeItem('dashboardPassword');
+            currentUser = null;
             showLoginModal();
-            throw new Error('Authentication required. Please enter the password.');
+            throw new Error('Authentication required. Please log in.');
         }
         
         // Safely parse error response
