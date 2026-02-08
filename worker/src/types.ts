@@ -3,8 +3,41 @@ import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
 export interface Env {
   DB: D1Database;
   CRON_JOBS_KV: KVNamespace;
+  SESSION_KV: KVNamespace;
   ALLOWED_ORIGIN?: string;
   DASHBOARD_PASSWORD?: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  ALLOWED_DOMAIN: string;
+  SESSION_SECRET: string;
+}
+
+// OAuth Types
+export interface GoogleTokenResponse {
+  access_token: string;
+  expires_in: number;
+  id_token: string;
+  scope: string;
+  token_type: string;
+}
+
+export interface GoogleUserInfo {
+  sub: string;
+  email: string;
+  email_verified: boolean;
+  name: string;
+  picture?: string;
+  given_name?: string;
+  family_name?: string;
+}
+
+export interface Session {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export interface Task {

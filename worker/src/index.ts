@@ -1,30 +1,165 @@
-import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus } from './types';
+import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session } from './types';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Dashboard-Password',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Content-Type': 'application/json',
 };
 
-// Password validation helper
-function validatePassword(request: Request, env: Env): Response | null {
-  // Skip validation if no password is configured
-  if (!env.DASHBOARD_PASSWORD) {
+// Session cookie name
+const SESSION_COOKIE_NAME = 'session';
+
+// Generate a random session ID
+function generateSessionId(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// Hash session ID for storage
+async function hashSessionId(sessionId: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(sessionId + secret);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// Get session from request
+async function getSession(request: Request, env: Env): Promise<Session | null> {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) return null;
+
+  const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
+    const [key, value] = cookie.trim().split('=');
+    acc[key] = value;
+    return acc;
+  }, {} as Record<string, string>);
+
+  const sessionId = cookies[SESSION_COOKIE_NAME];
+  if (!sessionId) return null;
+
+  const sessionKey = await hashSessionId(sessionId, env.SESSION_SECRET);
+  const sessionData = await env.SESSION_KV.get(sessionKey);
+  if (!sessionData) return null;
+
+  try {
+    const session: Session = JSON.parse(sessionData);
+    // Check expiration
+    if (Date.now() > session.expiresAt) {
+      await env.SESSION_KV.delete(sessionKey);
+      return null;
+    }
+    return session;
+  } catch {
     return null;
   }
+}
 
-  const providedPassword = request.headers.get('X-Dashboard-Password');
-  
-  if (!providedPassword) {
-    return new Response(JSON.stringify({ error: 'Password required' }), {
-      status: 401,
-      headers: CORS_HEADERS,
-    });
+// Create a new session
+async function createSession(userInfo: GoogleUserInfo, env: Env): Promise<{ sessionId: string; session: Session }> {
+  const sessionId = generateSessionId();
+  const session: Session = {
+    userId: userInfo.sub,
+    email: userInfo.email,
+    name: userInfo.name,
+    picture: userInfo.picture,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+  };
+
+  const sessionKey = await hashSessionId(sessionId, env.SESSION_SECRET);
+  await env.SESSION_KV.put(sessionKey, JSON.stringify(session), {
+    expirationTtl: 7 * 24 * 60 * 60, // 7 days in seconds
+  });
+
+  return { sessionId, session };
+}
+
+// Clear session
+async function clearSession(request: Request, env: Env): Promise<void> {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) return;
+
+  const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
+    const [key, value] = cookie.trim().split('=');
+    acc[key] = value;
+    return acc;
+  }, {} as Record<string, string>);
+
+  const sessionId = cookies[SESSION_COOKIE_NAME];
+  if (!sessionId) return;
+
+  const sessionKey = await hashSessionId(sessionId, env.SESSION_SECRET);
+  await env.SESSION_KV.delete(sessionKey);
+}
+
+// Exchange Google authorization code for tokens
+async function exchangeCodeForTokens(code: string, redirectUri: string, env: Env): Promise<GoogleTokenResponse> {
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      code,
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Token exchange failed: ${error}`);
   }
 
-  if (providedPassword !== env.DASHBOARD_PASSWORD) {
-    return new Response(JSON.stringify({ error: 'Invalid password' }), {
+  return response.json() as Promise<GoogleTokenResponse>;
+}
+
+// Get user info from Google ID token
+async function getGoogleUserInfo(idToken: string): Promise<GoogleUserInfo> {
+  // Decode JWT payload
+  const payload = idToken.split('.')[1];
+  const decodedPayload = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+  
+  return {
+    sub: decodedPayload.sub,
+    email: decodedPayload.email,
+    email_verified: decodedPayload.email_verified,
+    name: decodedPayload.name,
+    picture: decodedPayload.picture,
+    given_name: decodedPayload.given_name,
+    family_name: decodedPayload.family_name,
+  };
+}
+
+// Validate email domain
+function validateEmailDomain(email: string, allowedDomain: string): boolean {
+  return email.toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`);
+}
+
+// Session validation helper
+async function validateSession(request: Request, env: Env): Promise<Response | null> {
+  // Skip validation if no OAuth is configured (fallback to password or allow)
+  if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID === 'placeholder') {
+    // Fall back to password validation if configured
+    if (env.DASHBOARD_PASSWORD) {
+      const providedPassword = request.headers.get('X-Dashboard-Password');
+      if (!providedPassword || providedPassword !== env.DASHBOARD_PASSWORD) {
+        return new Response(JSON.stringify({ error: 'Invalid password' }), {
+          status: 401,
+          headers: CORS_HEADERS,
+        });
+      }
+    }
+    return null; // Allow access if no auth configured
+  }
+
+  const session = await getSession(request, env);
+  if (!session) {
+    return new Response(JSON.stringify({ error: 'Authentication required', authUrl: '/auth/google' }), {
       status: 401,
       headers: CORS_HEADERS,
     });
@@ -169,13 +304,33 @@ export default {
       CORS_HEADERS['Access-Control-Allow-Origin'] = env.ALLOWED_ORIGIN;
     }
 
-    // Validate password
-    const passwordError = validatePassword(request, env);
-    if (passwordError) {
-      return passwordError;
-    }
-
     try {
+      // OAuth Routes - no session validation required
+      // GET /auth/google - Redirect to Google OAuth
+      if (path === '/auth/google' && method === 'GET') {
+        return await handleGoogleAuth(url, env);
+      }
+
+      // GET /auth/callback - Google OAuth callback
+      if (path === '/auth/callback' && method === 'GET') {
+        return await handleAuthCallback(url, env);
+      }
+
+      // POST /auth/logout - Logout
+      if (path === '/auth/logout' && method === 'POST') {
+        return await handleLogout(request, env);
+      }
+
+      // GET /auth/me - Get current user
+      if (path === '/auth/me' && method === 'GET') {
+        return await handleGetMe(request, env);
+      }
+
+      // Validate session for all other routes
+      const sessionError = await validateSession(request, env);
+      if (sessionError) {
+        return sessionError;
+      }
       // GET /tasks - List all tasks
       if (path === '/tasks' && method === 'GET') {
         return await listTasks(env, url.searchParams);
