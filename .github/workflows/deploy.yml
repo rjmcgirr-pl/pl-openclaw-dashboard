@@ -64,8 +64,9 @@ jobs:
         env:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_AUTH_CLIENT_ID: ${{ secrets.GOOGLE_AUTH_CLIENT_ID }}
+          GOOGLE_AUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
+          ALLOWED_AUTH_DOMAIN: ${{ secrets.ALLOWED_AUTH_DOMAIN }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
           node -e "
@@ -73,14 +74,14 @@ jobs:
             const content = fs.readFileSync('wrangler.toml', 'utf8');
             const dbId = process.env.DB_ID;
             const password = process.env.PASSWORD;
-            const googleClientId = process.env.GOOGLE_CLIENT_ID || 'placeholder';
-            const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || 'placeholder';
-            const sessionSecret = process.env.SESSION_SECRET || 'placeholder';
+            const googleClientId = process.env.GOOGLE_AUTH_CLIENT_ID || 'placeholder';
+            const allowedDomain = process.env.ALLOWED_AUTH_DOMAIN || 'propertyllama.com';
             const updated = content
               .replace(/your-database-id-here/g, dbId)
               .replace(/your-password-here/g, password)
               .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
-              .replace(/placeholder/g, googleClientId);
+              .replace(/GOOGLE_CLIENT_ID = \"placeholder\"/g, 'GOOGLE_CLIENT_ID = \"' + googleClientId + '\"')
+              .replace(/ALLOWED_DOMAIN = \"propertyllama.com\"/g, 'ALLOWED_DOMAIN = \"' + allowedDomain + '\"');
             fs.writeFileSync('wrangler.toml', updated);
           "
 
@@ -90,7 +91,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env staging --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+          command: deploy --env staging --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
 
       - name: Run D1 Migrations on Staging
         continue-on-error: true
@@ -163,8 +164,9 @@ jobs:
         env:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_AUTH_CLIENT_ID: ${{ secrets.GOOGLE_AUTH_CLIENT_ID }}
+          GOOGLE_AUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
+          ALLOWED_AUTH_DOMAIN: ${{ secrets.ALLOWED_AUTH_DOMAIN }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
           node -e "
@@ -172,14 +174,14 @@ jobs:
             const content = fs.readFileSync('wrangler.toml', 'utf8');
             const dbId = process.env.DB_ID;
             const password = process.env.PASSWORD;
-            const googleClientId = process.env.GOOGLE_CLIENT_ID || 'placeholder';
-            const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || 'placeholder';
-            const sessionSecret = process.env.SESSION_SECRET || 'placeholder';
+            const googleClientId = process.env.GOOGLE_AUTH_CLIENT_ID || 'placeholder';
+            const allowedDomain = process.env.ALLOWED_AUTH_DOMAIN || 'propertyllama.com';
             const updated = content
               .replace(/your-database-id-here/g, dbId)
               .replace(/your-password-here/g, password)
               .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
-              .replace(/placeholder/g, googleClientId);
+              .replace(/GOOGLE_CLIENT_ID = \"placeholder\"/g, 'GOOGLE_CLIENT_ID = \"' + googleClientId + '\"')
+              .replace(/ALLOWED_DOMAIN = \"propertyllama.com\"/g, 'ALLOWED_DOMAIN = \"' + allowedDomain + '\"');
             fs.writeFileSync('wrangler.toml', updated);
           "
 
@@ -189,7 +191,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env production --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+          command: deploy --env production --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
 
       - name: Run D1 Migrations on Production
         uses: cloudflare/wrangler-action@v3
@@ -201,6 +203,8 @@ jobs:
 
       - name: Deploy Pages to Production
         uses: cloudflare/wrangler-action@v3
+        env:
+          VITE_GOOGLE_AUTH_CLIENT_ID: ${{ secrets.VITE_GOOGLE_AUTH_CLIENT_ID }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
