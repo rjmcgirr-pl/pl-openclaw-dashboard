@@ -70,12 +70,16 @@ async function init() {
             currentUser = data.user;
             console.log('[Init] User authenticated:', currentUser.name);
             await initializeDashboard();
-        } else {
+        } else if (meResponse.status === 401) {
             console.log('[Init] No active session, showing login modal');
+            showLoginModal();
+        } else {
+            console.log('[Init] Auth check returned:', meResponse.status);
             showLoginModal();
         }
     } catch (error) {
-        console.log('[Init] Auth check failed, showing login:', error.message);
+        console.error('[Init] Auth check failed:', error.message);
+        // Network error or API unavailable - still show login
         showLoginModal();
     }
 }
@@ -121,6 +125,12 @@ function hideLoginModal() {
 let oauthPopup = null;
 
 function initiateGoogleAuth() {
+    // Clear any previous error
+    const errorDiv = document.getElementById('loginError');
+    if (errorDiv) {
+        errorDiv.style.display = 'none';
+    }
+    
     const width = 500;
     const height = 600;
     const left = window.screenX + (window.outerWidth - width) / 2;
@@ -131,6 +141,9 @@ function initiateGoogleAuth() {
         'googleOAuth',
         `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,location=no,status=no`
     );
+    
+    // Start polling to detect if popup is closed
+    startOAuthPolling();
 }
 
 function setupOAuthListeners() {
@@ -146,18 +159,82 @@ function setupOAuthListeners() {
             console.log('[OAuth] Login successful');
             currentUser = event.data.user;
             hideLoginModal();
+            clearOAuthPolling();
             await initializeDashboard();
             if (oauthPopup && !oauthPopup.closed) {
                 oauthPopup.close();
             }
         } else if (event.data.type === 'oauth-error') {
             console.error('[OAuth] Login failed:', event.data.error);
-            showError('Login failed: ' + event.data.error);
+            clearOAuthPolling();
+            showLoginError('Login failed: ' + event.data.error);
             if (oauthPopup && !oauthPopup.closed) {
                 oauthPopup.close();
             }
+            // Ensure login modal is shown
+            showLoginModal();
         }
     });
+}
+
+let oauthPollInterval = null;
+
+function clearOAuthPolling() {
+    if (oauthPollInterval) {
+        clearInterval(oauthPollInterval);
+        oauthPollInterval = null;
+    }
+}
+
+function startOAuthPolling() {
+    clearOAuthPolling();
+    
+    // Poll every 500ms to check if popup was closed
+    oauthPollInterval = setInterval(() => {
+        if (oauthPopup && oauthPopup.closed) {
+            console.log('[OAuth] Popup closed by user');
+            clearOAuthPolling();
+            
+            // Check if we got a session (user might have closed after success)
+            setTimeout(async () => {
+                try {
+                    const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+                        credentials: 'include'
+                    });
+                    
+                    if (meResponse.ok) {
+                        const data = await meResponse.json();
+                        currentUser = data.user;
+                        console.log('[OAuth] Session found after popup close');
+                        hideLoginModal();
+                        await initializeDashboard();
+                    } else {
+                        // No session, show login again
+                        console.log('[OAuth] No session after popup close');
+                        showLoginError('Login was cancelled. Please try again.');
+                        showLoginModal();
+                    }
+                } catch (error) {
+                    console.log('[OAuth] Error checking session:', error.message);
+                    showLoginError('Unable to verify login. Please try again.');
+                    showLoginModal();
+                }
+            }, 500);
+        }
+    }, 500);
+    
+    // Stop polling after 2 minutes (timeout)
+    setTimeout(() => {
+        clearOAuthPolling();
+    }, 120000);
+}
+
+function showLoginError(message) {
+    const errorDiv = document.getElementById('loginError');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
 }
 
 async function handleLogout() {
