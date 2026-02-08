@@ -1,11 +1,16 @@
 import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session } from './types';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json',
-};
+// Dynamic CORS headers - origin must match the requesting site for credentials to work
+function getCorsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') || 'https://openclaw.propertyllama.com';
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
+    'Content-Type': 'application/json',
+  };
+}
 
 // Session cookie name
 const SESSION_COOKIE_NAME = 'session';
@@ -150,7 +155,7 @@ async function validateSession(request: Request, env: Env): Promise<Response | n
       if (!providedPassword || providedPassword !== env.DASHBOARD_PASSWORD) {
         return new Response(JSON.stringify({ error: 'Invalid password' }), {
           status: 401,
-          headers: CORS_HEADERS,
+          headers: getCorsHeaders(request),
         });
       }
     }
@@ -161,25 +166,31 @@ async function validateSession(request: Request, env: Env): Promise<Response | n
   if (!session) {
     return new Response(JSON.stringify({ error: 'Authentication required', authUrl: '/auth/google' }), {
       status: 401,
-      headers: CORS_HEADERS,
+      headers: getCorsHeaders(request),
     });
   }
 
   return null; // Validation passed
 }
 
-function jsonResponse(data: unknown, status = 200, customHeaders?: Record<string, string>): Response {
+function jsonResponse(data: unknown, status = 200, request?: Request, customHeaders?: Record<string, string>): Response {
+  const corsHeaders = request ? getCorsHeaders(request) : {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json',
+  };
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      ...CORS_HEADERS,
+      ...corsHeaders,
       ...customHeaders,
     },
   });
 }
 
-function errorResponse(message: string, status = 400): Response {
-  return jsonResponse({ error: message }, status);
+function errorResponse(message: string, status = 400, request?: Request): Response {
+  return jsonResponse({ error: message }, status, request);
 }
 
 // Validation helpers for OpenClaw cron job configuration
@@ -294,14 +305,9 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    // Handle CORS preflight
+    // Handle CORS preflight with dynamic origin
     if (method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS });
-    }
-
-    // Set allowed origin if specified
-    if (env.ALLOWED_ORIGIN) {
-      CORS_HEADERS['Access-Control-Allow-Origin'] = env.ALLOWED_ORIGIN;
+      return new Response(null, { headers: getCorsHeaders(request) });
     }
 
     try {
@@ -333,7 +339,7 @@ export default {
       }
       // GET /tasks - List all tasks
       if (path === '/tasks' && method === 'GET') {
-        return await listTasks(env, url.searchParams);
+        return await listTasks(env, url.searchParams, request);
       }
 
       // POST /tasks - Create a new task
@@ -483,7 +489,6 @@ async function handleGoogleAuth(url: URL, env: Env): Promise<Response> {
     status: 302,
     headers: {
       'Location': googleAuthUrl.toString(),
-      ...CORS_HEADERS,
     },
   });
 }
@@ -607,13 +612,14 @@ async function handleAuthCallback(url: URL, env: Env): Promise<Response> {
     const { sessionId, session } = await createSession(userInfo, env);
 
     // Return HTML that posts message to parent window and sets cookie
+    // SameSite=None is required for cross-domain cookies
     return new Response(`
       <!DOCTYPE html>
       <html>
         <head><title>Authentication Successful</title></head>
         <body>
           <script>
-            document.cookie = '${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=Lax; Max-Age=604800';
+            document.cookie = '${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=None; Max-Age=604800';
             window.opener.postMessage({ type: 'oauth-success', user: ${JSON.stringify(session).replace(/</g, '\\u003c')} }, '*');
             setTimeout(() => window.close(), 500);
           </script>
@@ -624,7 +630,7 @@ async function handleAuthCallback(url: URL, env: Env): Promise<Response> {
       status: 200,
       headers: {
         'Content-Type': 'text/html',
-        'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=Lax; Max-Age=604800`,
+        'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=None; Max-Age=604800`,
       },
     });
   } catch (err) {
@@ -654,8 +660,8 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
   return new Response(JSON.stringify({ success: true }), {
     status: 200,
     headers: {
-      ...CORS_HEADERS,
-      'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Secure; SameSite=Lax; Max-Age=0`,
+      ...getCorsHeaders(request),
+      'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Secure; SameSite=None; Max-Age=0`,
     },
   });
 }
@@ -666,14 +672,14 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   if (!session) {
     return new Response(JSON.stringify({ error: 'Not authenticated' }), {
       status: 401,
-      headers: CORS_HEADERS,
+      headers: getCorsHeaders(request),
     });
   }
 
-  return jsonResponse({ user: session });
+  return jsonResponse({ user: session }, 200, request);
 }
 
-async function listTasks(env: Env, searchParams: URLSearchParams): Promise<Response> {
+async function listTasks(env: Env, searchParams: URLSearchParams, request: Request): Promise<Response> {
   let sql = 'SELECT * FROM tasks';
   const params: (string | number)[] = [];
   const conditions: string[] = [];
@@ -700,17 +706,17 @@ async function listTasks(env: Env, searchParams: URLSearchParams): Promise<Respo
   sql += ' ORDER BY priority DESC, created_at DESC';
 
   const { results } = await env.DB.prepare(sql).bind(...params).all<Task>();
-  return jsonResponse({ tasks: results || [] });
+  return jsonResponse({ tasks: results || [] }, 200, request);
 }
 
-async function getTask(env: Env, id: number): Promise<Response> {
+async function getTask(env: Env, id: number, request: Request): Promise<Response> {
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<Task>();
   
   if (!task) {
-    return errorResponse('Task not found', 404);
+    return errorResponse('Task not found', 404, request);
   }
 
-  return jsonResponse({ task });
+  return jsonResponse({ task }, 200, request);
 }
 
 async function createTask(env: Env, request: Request): Promise<Response> {
@@ -786,10 +792,10 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createTask] Successfully created task:', task.id);
-    return jsonResponse({ task }, 201);
+    return jsonResponse({ task }, 201, request);
   } catch (error) {
     console.error('[createTask] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
