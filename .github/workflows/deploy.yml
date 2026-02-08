@@ -79,7 +79,7 @@ jobs:
             const updated = content
               .replace(/your-database-id-here/g, dbId)
               .replace(/your-password-here/g, password)
-              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
+              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.AUTH_SESSION_KV_NAMESPACE_ID }}')
               .replace(/GOOGLE_CLIENT_ID = \"placeholder\"/g, 'GOOGLE_CLIENT_ID = \"' + googleClientId + '\"')
               .replace(/ALLOWED_DOMAIN = \"propertyllama.com\"/g, 'ALLOWED_DOMAIN = \"' + allowedDomain + '\"');
             fs.writeFileSync('wrangler.toml', updated);
@@ -179,7 +179,7 @@ jobs:
             const updated = content
               .replace(/your-database-id-here/g, dbId)
               .replace(/your-password-here/g, password)
-              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
+              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.AUTH_SESSION_KV_NAMESPACE_ID }}')
               .replace(/GOOGLE_CLIENT_ID = \"placeholder\"/g, 'GOOGLE_CLIENT_ID = \"' + googleClientId + '\"')
               .replace(/ALLOWED_DOMAIN = \"propertyllama.com\"/g, 'ALLOWED_DOMAIN = \"' + allowedDomain + '\"');
             fs.writeFileSync('wrangler.toml', updated);
