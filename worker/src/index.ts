@@ -461,6 +461,218 @@ export default {
   },
 };
 
+// OAuth Handler Functions
+
+async function handleGoogleAuth(url: URL, env: Env): Promise<Response> {
+  const redirectUri = `${url.protocol}//${url.host}/auth/callback`;
+  const state = generateSessionId(); // Generate state for CSRF protection
+  
+  // Store state in KV with short expiration (10 minutes)
+  await env.SESSION_KV.put(`oauth_state:${state}`, 'pending', { expirationTtl: 600 });
+
+  const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  googleAuthUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
+  googleAuthUrl.searchParams.set('redirect_uri', redirectUri);
+  googleAuthUrl.searchParams.set('response_type', 'code');
+  googleAuthUrl.searchParams.set('scope', 'openid email profile');
+  googleAuthUrl.searchParams.set('state', state);
+  googleAuthUrl.searchParams.set('access_type', 'online');
+  googleAuthUrl.searchParams.set('prompt', 'select_account');
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      'Location': googleAuthUrl.toString(),
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+async function handleAuthCallback(url: URL, env: Env): Promise<Response> {
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+
+  // Handle OAuth errors from Google
+  if (error) {
+    console.error('OAuth error from Google:', error);
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Authentication Failed</title></head>
+        <body>
+          <script>
+            window.opener.postMessage({ type: 'oauth-error', error: '${error}' }, '*');
+            window.close();
+          </script>
+          <p>Authentication failed. You can close this window.</p>
+        </body>
+      </html>
+    `, {
+      status: 400,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }
+
+  if (!code || !state) {
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Authentication Failed</title></head>
+        <body>
+          <script>
+            window.opener.postMessage({ type: 'oauth-error', error: 'Missing code or state' }, '*');
+            window.close();
+          </script>
+          <p>Invalid request. You can close this window.</p>
+        </body>
+      </html>
+    `, {
+      status: 400,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }
+
+  // Verify state to prevent CSRF
+  const stateKey = `oauth_state:${state}`;
+  const stateValue = await env.SESSION_KV.get(stateKey);
+  if (!stateValue) {
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Authentication Failed</title></head>
+        <body>
+          <script>
+            window.opener.postMessage({ type: 'oauth-error', error: 'Invalid or expired state' }, '*');
+            window.close();
+          </script>
+          <p>Invalid or expired session. You can close this window.</p>
+        </body>
+      </html>
+    `, {
+      status: 400,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }
+
+  // Delete the used state
+  await env.SESSION_KV.delete(stateKey);
+
+  try {
+    const redirectUri = `${url.protocol}//${url.host}/auth/callback`;
+    const tokens = await exchangeCodeForTokens(code, redirectUri, env);
+    const userInfo = await getGoogleUserInfo(tokens.id_token);
+
+    // Verify email is verified
+    if (!userInfo.email_verified) {
+      return new Response(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Failed</title></head>
+          <body>
+            <script>
+              window.opener.postMessage({ type: 'oauth-error', error: 'Email not verified' }, '*');
+              window.close();
+            </script>
+            <p>Email not verified. You can close this window.</p>
+          </body>
+        </html>
+      `, {
+        status: 403,
+        headers: { 'Content-Type': 'text/html' },
+      });
+    }
+
+    // Verify email domain
+    if (!validateEmailDomain(userInfo.email, env.ALLOWED_DOMAIN)) {
+      return new Response(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Failed</title></head>
+          <body>
+            <script>
+              window.opener.postMessage({ type: 'oauth-error', error: 'Unauthorized domain' }, '*');
+              window.close();
+            </script>
+            <p>Access restricted to ${env.ALLOWED_DOMAIN} email addresses. You can close this window.</p>
+          </body>
+        </html>
+      `, {
+        status: 403,
+        headers: { 'Content-Type': 'text/html' },
+      });
+    }
+
+    // Create session
+    const { sessionId, session } = await createSession(userInfo, env);
+
+    // Return HTML that posts message to parent window and sets cookie
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Authentication Successful</title></head>
+        <body>
+          <script>
+            document.cookie = '${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=Lax; Max-Age=604800';
+            window.opener.postMessage({ type: 'oauth-success', user: ${JSON.stringify(session).replace(/</g, '\\u003c')} }, '*');
+            setTimeout(() => window.close(), 500);
+          </script>
+          <p>Authentication successful! You can close this window.</p>
+        </body>
+      </html>
+    `, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html',
+        'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=Lax; Max-Age=604800`,
+      },
+    });
+  } catch (err) {
+    console.error('OAuth callback error:', err);
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Authentication Failed</title></head>
+        <body>
+          <script>
+            window.opener.postMessage({ type: 'oauth-error', error: 'Authentication failed' }, '*');
+            window.close();
+          </script>
+          <p>Authentication failed. You can close this window.</p>
+        </body>
+      </html>
+    `, {
+      status: 500,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }
+}
+
+async function handleLogout(request: Request, env: Env): Promise<Response> {
+  await clearSession(request, env);
+  
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: {
+      ...CORS_HEADERS,
+      'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Secure; SameSite=Lax; Max-Age=0`,
+    },
+  });
+}
+
+async function handleGetMe(request: Request, env: Env): Promise<Response> {
+  const session = await getSession(request, env);
+  
+  if (!session) {
+    return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+      status: 401,
+      headers: CORS_HEADERS,
+    });
+  }
+
+  return jsonResponse({ user: session });
+}
+
 async function listTasks(env: Env, searchParams: URLSearchParams): Promise<Response> {
   let sql = 'SELECT * FROM tasks';
   const params: (string | number)[] = [];

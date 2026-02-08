@@ -19,20 +19,28 @@ database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
 binding = "CRON_JOBS_KV"
 id = "dc82acf0e2dd40fd8f63e378d1b736be"
 
+# KV Namespace for Session Storage
+[[kv_namespaces]]
+binding = "SESSION_KV"
+id = "<your-session-kv-namespace-id>"
+
 # Environment variables
 [vars]
 # Set this to your Cloudflare Pages domain in production
 # ALLOWED_ORIGIN = "https://taskboard.pages.dev"
 # Dashboard password - will be injected by GitHub Actions
+# Google OAuth configuration
+GOOGLE_CLIENT_ID = "placeholder"
+ALLOWED_DOMAIN = "propertyllama.com"
 
 # For local development
 [env.local]
-vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-dev-password" }
+vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-dev-password", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
 
 # Staging environment
 [env.staging]
 name = "taskboard-api-staging"
-vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here" }
+vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -43,10 +51,14 @@ database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
 binding = "CRON_JOBS_KV"
 id = "dc82acf0e2dd40fd8f63e378d1b736be"
 
+[[env.staging.kv_namespaces]]
+binding = "SESSION_KV"
+id = "<your-session-kv-namespace-id>"
+
 # Production environment
 [env.production]
 name = "taskboard-api"
-vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here" }
+vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -56,3 +68,7 @@ database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
 [[env.production.kv_namespaces]]
 binding = "CRON_JOBS_KV"
 id = "dc82acf0e2dd40fd8f63e378d1b736be"
+
+[[env.production.kv_namespaces]]
+binding = "SESSION_KV"
+id = "<your-session-kv-namespace-id>"
