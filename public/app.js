@@ -4,6 +4,21 @@
 const API_BASE_URL = window.API_BASE_URL || 'https://taskboard-api.rei-workers.workers.dev';
 const GOOGLE_CLIENT_ID = import.meta.env?.VITE_GOOGLE_AUTH_CLIENT_ID || window.GOOGLE_CLIENT_ID || '';
 
+// Debug logging - visible on page
+function debugLog(msg) {
+    const timestamp = new Date().toLocaleTimeString();
+    const line = `[${timestamp}] ${msg}`;
+    console.log('[DEBUG]', line);
+    const debugDiv = document.getElementById('debugLog');
+    if (debugDiv) {
+        const entry = document.createElement('div');
+        entry.textContent = line;
+        entry.style.marginBottom = '2px';
+        debugDiv.appendChild(entry);
+        debugDiv.scrollTop = debugDiv.scrollHeight;
+    }
+}
+
 // Status configuration
 const STATUSES = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
 const STATUS_LABELS = {
@@ -52,45 +67,41 @@ const taskAssignedField = document.getElementById('taskAssigned');
 
 // Initialize
 async function init() {
-    console.log('[Init] Starting dashboard...');
-    const debugInit = document.getElementById('debugInitCalled');
-    const debugAuth = document.getElementById('debugAuthCheck');
-    if (debugInit) debugInit.textContent = 'Init: Called ✓';
+    debugLog('=== INIT START ===');
+    debugLog('API URL: ' + API_BASE_URL);
     
     // ALWAYS set up event listeners first (including OAuth handlers)
+    debugLog('Setting up event listeners...');
     setupEventListeners();
     setupOAuthListeners();
     
     // Check if user is authenticated
     try {
-        console.log('[Init] Checking session...');
-        if (debugAuth) debugAuth.textContent = 'Auth: Fetching /auth/me...';
+        debugLog('Checking session at /auth/me...');
         
         const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
             credentials: 'include'
         });
         
+        debugLog('/auth/me response: ' + meResponse.status);
+        
         if (meResponse.ok) {
             const data = await meResponse.json();
             currentUser = data.user;
-            console.log('[Init] User authenticated:', currentUser.name);
-            if (debugAuth) debugAuth.textContent = 'Auth: Logged in ✓';
+            debugLog('User authenticated: ' + currentUser.name);
             await initializeDashboard();
         } else if (meResponse.status === 401) {
-            console.log('[Init] No active session, showing login modal');
-            if (debugAuth) debugAuth.textContent = 'Auth: Not logged in (401)';
+            debugLog('No active session (401), showing login');
             showLoginModal();
         } else {
-            console.log('[Init] Auth check returned:', meResponse.status);
-            if (debugAuth) debugAuth.textContent = `Auth: Error ${meResponse.status}`;
+            debugLog('Auth error: ' + meResponse.status);
             showLoginModal();
         }
     } catch (error) {
-        console.error('[Init] Auth check failed:', error.message);
-        if (debugAuth) debugAuth.textContent = `Auth: Network Error - ${error.message}`;
-        // Network error or API unavailable - still show login
+        debugLog('Auth check FAILED: ' + error.message);
         showLoginModal();
     }
+    debugLog('=== INIT END ===');
 }
 
 // Initialize dashboard after authentication
@@ -134,7 +145,7 @@ function hideLoginModal() {
 let oauthPopup = null;
 
 function initiateGoogleAuth() {
-    console.log('[OAuth] Initiating Google OAuth...');
+    debugLog('=== GOOGLE AUTH CLICKED ===');
     
     // Clear any previous error
     const errorDiv = document.getElementById('loginError');
@@ -147,22 +158,23 @@ function initiateGoogleAuth() {
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     
-    console.log('[OAuth] Opening popup to:', `${API_BASE_URL}/auth/google`);
+    const popupUrl = `${API_BASE_URL}/auth/google`;
+    debugLog('Opening popup to: ' + popupUrl);
     
     oauthPopup = window.open(
-        `${API_BASE_URL}/auth/google`,
+        popupUrl,
         'googleOAuth',
         `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,location=no,status=no`
     );
     
     // Check if popup was blocked
     if (!oauthPopup || oauthPopup.closed || typeof oauthPopup.closed === 'undefined') {
-        console.error('[OAuth] Popup was blocked!');
+        debugLog('ERROR: Popup was blocked by browser!');
         showLoginError('Popup blocked. Please allow popups for this site and try again.');
         return;
     }
     
-    console.log('[OAuth] Popup opened successfully');
+    debugLog('Popup opened successfully');
     
     // Start polling to detect if popup is closed
     startOAuthPolling();
@@ -614,17 +626,17 @@ function setupEventListeners() {
 
     // Google Login button
     const googleLoginBtn = document.getElementById('googleLoginBtn');
-    console.log('[Setup] Google login button found:', !!googleLoginBtn);
+    debugLog('Google login button found: ' + (googleLoginBtn ? 'YES' : 'NO'));
     if (googleLoginBtn) {
         googleLoginBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[Login] Google login button clicked');
+            debugLog('Button clicked via addEventListener');
             initiateGoogleAuth();
         });
-        console.log('[Setup] Google login listener attached');
+        debugLog('Event listener attached to button');
     } else {
-        console.error('[Setup] Google login button NOT found in DOM');
+        debugLog('ERROR: Google login button NOT found in DOM');
     }
 
     // Logout button
