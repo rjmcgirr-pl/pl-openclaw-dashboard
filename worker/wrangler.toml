@@ -22,7 +22,7 @@ id = "dc82acf0e2dd40fd8f63e378d1b736be"
 # KV Namespace for Session Storage
 [[kv_namespaces]]
 binding = "SESSION_KV"
-id = "<your-session-kv-namespace-id>"
+id = "a25297fb8b76435ba06747f2e9417c62"
 
 # Environment variables
 [vars]
@@ -53,7 +53,7 @@ id = "dc82acf0e2dd40fd8f63e378d1b736be"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSION_KV"
-id = "<your-session-kv-namespace-id>"
+id = "a25297fb8b76435ba06747f2e9417c62"
 
 # Production environment
 [env.production]
@@ -71,4 +71,4 @@ id = "dc82acf0e2dd40fd8f63e378d1b736be"
 
 [[env.production.kv_namespaces]]
 binding = "SESSION_KV"
-id = "<your-session-kv-namespace-id>"
+id = "a25297fb8b76435ba06747f2e9417c62"
