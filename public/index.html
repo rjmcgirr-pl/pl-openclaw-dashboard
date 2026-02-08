@@ -181,11 +181,49 @@
                     <input type="text" id="cronJobSkillPath" placeholder="e.g., skills/backup.md">
                     <span class="form-hint">Optional path to the skill documentation</span>
                 </div>
+                <div class="form-group">
+                    <label for="cronJobSkillMdContent">Skill.md Content</label>
+                    <textarea id="cronJobSkillMdContent" rows="5" placeholder="Enter markdown content for this cron job..."></textarea>
+                    <span class="form-hint">Optional - max 100KB</span>
+                </div>
                 <div class="form-actions">
                     <button type="button" id="deleteCronJobBtn" class="btn-danger" style="display: none;">Delete</button>
                     <button type="submit" class="btn-primary">Save Cron Job</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Markdown Editor Modal -->
+    <div id="markdownEditorModal" class="modal">
+        <div class="modal-content markdown-editor-modal">
+            <div class="modal-header">
+                <h2 id="markdownEditorTitle">Edit Skill.md Content</h2>
+                <button class="close-btn" id="closeMarkdownEditor">&times;</button>
+            </div>
+            <div class="markdown-editor-container">
+                <div class="markdown-editor-note">
+                    <span class="note-icon">⚠️</span>
+                    <span>Changes here don't affect actual skill files - copy/paste manually</span>
+                </div>
+                <div class="markdown-split-pane">
+                    <div class="markdown-editor-pane">
+                        <label for="markdownEditorTextarea" class="pane-label">Editor</label>
+                        <textarea id="markdownEditorTextarea" placeholder="Enter markdown content here..."></textarea>
+                        <div class="character-counter">
+                            <span id="charCount">0</span> / 100KB
+                        </div>
+                    </div>
+                    <div class="markdown-preview-pane">
+                        <label class="pane-label">Preview</label>
+                        <div id="markdownPreview" class="markdown-preview-content"></div>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="cancelMarkdownEditor" class="btn-secondary">Cancel</button>
+                    <button type="button" id="saveMarkdownEditor" class="btn-primary">Save Changes</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -208,6 +246,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

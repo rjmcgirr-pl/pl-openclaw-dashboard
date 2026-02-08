@@ -656,7 +656,24 @@ function createCronJobCard(job) {
     const statusLabel = CRON_STATUS_LABELS[job.last_status] || job.last_status;
     const lastRun = job.last_run_at ? formatDate(job.last_run_at) : 'Never';
     const nextRun = job.next_run_at ? formatDate(job.next_run_at) : 'Not scheduled';
-    
+
+    // Render markdown content for preview (truncated)
+    let skillMdPreview = '';
+    if (job.skill_md_content) {
+        const previewText = job.skill_md_content.substring(0, 300);
+        const isTruncated = job.skill_md_content.length > 300;
+        skillMdPreview = `
+            <div class="skill-md-preview">
+                <div class="skill-md-header">
+                    <span class="skill-md-icon">📄</span>
+                    <span class="skill-md-title">Skill.md Content</span>
+                    <span class="skill-md-size">(${(job.skill_md_content.length / 1024).toFixed(1)} KB)</span>
+                </div>
+                <div class="skill-md-content">${escapeHtml(previewText)}${isTruncated ? '...' : ''}</div>
+            </div>
+        `;
+    }
+
     return `
         <div class="cron-job-card" data-cron-id="${job.id}">
             <div class="cron-job-header">
@@ -667,7 +684,8 @@ function createCronJobCard(job) {
                         <div class="cron-job-meta">
                             <span>⏱️ ${escapeHtml(job.schedule)}</span>
                             <span>🕐 Last: ${lastRun}</span>
-                            ${job.skill_md_path ? `<span>📄 <a href="${escapeHtml(job.skill_md_path)}" target="_blank">skill.md</a></span>` : ''}
+                            ${job.skill_md_path ? `<span>📎 <a href="${escapeHtml(job.skill_md_path)}" target="_blank">skill.md</a></span>` : ''}
+                            ${job.skill_md_content ? `<span>📝 Content (${(job.skill_md_content.length / 1024).toFixed(1)} KB)</span>` : ''}
                         </div>
                     </div>
                     <span class="cron-job-badge ${job.last_status}">${statusLabel}</span>
@@ -676,9 +694,11 @@ function createCronJobCard(job) {
             </div>
             <div class="cron-job-details">
                 ${job.description ? `<div class="cron-job-description">${escapeHtml(job.description)}</div>` : ''}
+                ${skillMdPreview}
                 <div class="cron-job-output">${job.last_output ? escapeHtml(job.last_output) : ''}</div>
                 <div class="cron-job-actions">
                     <button class="btn-secondary" onclick="editCronJob(${job.id})">Edit</button>
+                    <button class="btn-secondary" onclick="openMarkdownEditor(${job.id})">Edit Skill.md</button>
                     <button class="btn-primary" onclick="runCronJob(${job.id})">Run Now</button>
                 </div>
             </div>
@@ -770,13 +790,14 @@ function openNewCronModal() {
 function editCronJob(id) {
     const job = cronJobs.find(j => j.id === id);
     if (!job) return;
-    
+
     document.getElementById('cronModalTitle').textContent = 'Edit Cron Job';
     document.getElementById('cronJobId').value = job.id;
     document.getElementById('cronJobName').value = job.name;
     document.getElementById('cronJobDescription').value = job.description || '';
     document.getElementById('cronJobSchedule').value = job.schedule;
     document.getElementById('cronJobSkillPath').value = job.skill_md_path || '';
+    document.getElementById('cronJobSkillMdContent').value = job.skill_md_content || '';
     document.getElementById('deleteCronJobBtn').style.display = 'block';
     document.getElementById('cronJobModal').classList.add('active');
 }
@@ -811,12 +832,21 @@ function setupCronEventListeners() {
     if (cronJobForm) {
         cronJobForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
+            const skillMdContent = document.getElementById('cronJobSkillMdContent').value;
+
+            // Validate size
+            if (skillMdContent.length > 100000) {
+                showError('Skill.md content exceeds 100KB limit. Please reduce the size.');
+                return;
+            }
+
             const cronJobData = {
                 name: document.getElementById('cronJobName').value.trim(),
                 description: document.getElementById('cronJobDescription').value.trim() || undefined,
                 schedule: document.getElementById('cronJobSchedule').value.trim(),
                 skill_md_path: document.getElementById('cronJobSkillPath').value.trim() || undefined,
+                skill_md_content: skillMdContent || undefined,
             };
 
             const id = document.getElementById('cronJobId').value;
@@ -850,6 +880,39 @@ function setupCronEventListeners() {
             if (e.target === cronJobModal) closeCronModal();
         });
     }
+
+    // Markdown Editor Modal Event Listeners
+    const markdownEditorModal = document.getElementById('markdownEditorModal');
+    const markdownEditorTextarea = document.getElementById('markdownEditorTextarea');
+    const closeMarkdownEditorBtn = document.getElementById('closeMarkdownEditor');
+    const cancelMarkdownEditorBtn = document.getElementById('cancelMarkdownEditor');
+    const saveMarkdownEditorBtn = document.getElementById('saveMarkdownEditor');
+
+    if (closeMarkdownEditorBtn) {
+        closeMarkdownEditorBtn.addEventListener('click', closeMarkdownEditor);
+    }
+
+    if (cancelMarkdownEditorBtn) {
+        cancelMarkdownEditorBtn.addEventListener('click', closeMarkdownEditor);
+    }
+
+    if (saveMarkdownEditorBtn) {
+        saveMarkdownEditorBtn.addEventListener('click', saveMarkdownContent);
+    }
+
+    if (markdownEditorTextarea) {
+        markdownEditorTextarea.addEventListener('input', () => {
+            updateCharCount();
+            updateMarkdownPreview();
+            autoResizeTextarea(markdownEditorTextarea);
+        });
+    }
+
+    if (markdownEditorModal) {
+        markdownEditorModal.addEventListener('click', (e) => {
+            if (e.target === markdownEditorModal) closeMarkdownEditor();
+        });
+    }
 }
 
 function startCronAutoRefresh() {
@@ -868,9 +931,183 @@ function stopCronAutoRefresh() {
     }
 }
 
+// Markdown Editor State
+let currentMarkdownJobId = null;
+
+// Markdown Editor Functions
+function openMarkdownEditor(jobId) {
+    const job = cronJobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    currentMarkdownJobId = jobId;
+    const textarea = document.getElementById('markdownEditorTextarea');
+    const title = document.getElementById('markdownEditorTitle');
+
+    title.textContent = `Edit Skill.md - ${job.name}`;
+    textarea.value = job.skill_md_content || '';
+
+    updateCharCount();
+    updateMarkdownPreview();
+
+    const modal = document.getElementById('markdownEditorModal');
+    modal.classList.add('active');
+
+    // Auto-resize textarea
+    autoResizeTextarea(textarea);
+}
+
+function closeMarkdownEditor() {
+    const modal = document.getElementById('markdownEditorModal');
+    modal.classList.remove('active');
+    currentMarkdownJobId = null;
+}
+
+function updateCharCount() {
+    const textarea = document.getElementById('markdownEditorTextarea');
+    const countSpan = document.getElementById('charCount');
+    const count = textarea.value.length;
+    countSpan.textContent = count.toLocaleString();
+
+    // Visual feedback if approaching limit
+    if (count > 90000) {
+        countSpan.style.color = '#ff6b6b';
+    } else if (count > 70000) {
+        countSpan.style.color = '#ffd93d';
+    } else {
+        countSpan.style.color = '';
+    }
+}
+
+function updateMarkdownPreview() {
+    const textarea = document.getElementById('markdownEditorTextarea');
+    const preview = document.getElementById('markdownPreview');
+    const content = textarea.value;
+
+    if (typeof marked !== 'undefined') {
+        preview.innerHTML = marked.parse(content);
+    } else {
+        // Fallback to simple HTML conversion
+        preview.innerHTML = simpleMarkdownToHtml(content);
+    }
+}
+
+function simpleMarkdownToHtml(markdown) {
+    if (!markdown) return '';
+
+    let html = markdown
+        // Escape HTML
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        // Headers
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        // Bold and italic
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        // Code blocks
+        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Lists
+        .replace(/^\* (.*$)/gim, '<li>$1</li>')
+        .replace(/^- (.*$)/gim, '<li>$1</li>')
+        .replace(/(^<li>.*<\/li>\n?)+/gm, '<ul>$&</ul>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+        // Line breaks
+        .replace(/\n/g, '<br>');
+
+    return html;
+}
+
+function autoResizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 600) + 'px';
+}
+
+async function saveMarkdownContent() {
+    if (!currentMarkdownJobId) return;
+
+    const textarea = document.getElementById('markdownEditorTextarea');
+    const content = textarea.value;
+
+    // Validate size
+    if (content.length > 100000) {
+        showError('Content exceeds 100KB limit. Please reduce the size.');
+        return;
+    }
+
+    try {
+        await apiRequest(`/cron-jobs/${currentMarkdownJobId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ skill_md_content: content }),
+        });
+
+        // Show success message
+        showToast('Skill.md content saved successfully', 'success');
+
+        // Close modal and refresh
+        closeMarkdownEditor();
+        await loadCronJobs();
+    } catch (error) {
+        showError('Failed to save skill.md content: ' + error.message);
+        showToast('Failed to save: ' + error.message, 'error');
+    }
+}
+
+function showToast(message, type = 'info') {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+
+    // Add styles if not already present
+    if (!document.getElementById('toast-styles')) {
+        const style = document.createElement('style');
+        style.id = 'toast-styles';
+        style.textContent = `
+            .toast {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                padding: 12px 20px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 500;
+                z-index: 10000;
+                animation: slideIn 0.3s ease;
+                max-width: 300px;
+            }
+            .toast-success { background-color: #2ecc71; }
+            .toast-error { background-color: #e74c3c; }
+            .toast-info { background-color: #3498db; }
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes fadeOut {
+                from { opacity: 1; }
+                to { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    document.body.appendChild(toast);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
 // Make functions available globally for inline onclick handlers
 window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
+window.openMarkdownEditor = openMarkdownEditor;
 
 // Start the app
 init();
