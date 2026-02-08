@@ -512,75 +512,20 @@ function setupEventListeners() {
         }
     });
 
-    // Login form
-    const loginForm = document.getElementById('loginForm');
-    const loginPasswordField = document.getElementById('loginPassword');
-    const loginErrorDiv = document.getElementById('loginError');
-    const loginSubmitBtn = loginForm ? loginForm.querySelector('button[type="submit"]') : null;
-
-    if (loginForm) {
-        loginForm.addEventListener('submit', async (e) => {
+    // Google Login button
+    const googleLoginBtn = document.getElementById('googleLoginBtn');
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            console.log('[Login] Form submitted');
-            
-            // Clear previous errors
-            loginErrorDiv.style.display = 'none';
-            loginErrorDiv.textContent = '';
-
-            const password = loginPasswordField.value.trim();
-            
-            // Validate input
-            if (!password) {
-                loginErrorDiv.textContent = 'Please enter a password.';
-                loginErrorDiv.style.display = 'block';
-                loginPasswordField.focus();
-                return;
-            }
-            
-            console.log('[Login] Password entered:', password ? 'Yes (length: ' + password.length + ')' : 'No');
-            
-            // Show loading state
-            const originalBtnText = loginSubmitBtn ? loginSubmitBtn.textContent : 'Login';
-            if (loginSubmitBtn) {
-                loginSubmitBtn.disabled = true;
-                loginSubmitBtn.textContent = 'Logging in...';
-            }
-            
-            try {
-                const success = await handleLogin(password);
-                console.log('[Login] handleLogin returned:', success);
-
-                if (!success) {
-                    console.log('[Login] Showing error message');
-                    loginErrorDiv.textContent = 'Invalid password. Please try again.';
-                    loginErrorDiv.style.display = 'block';
-                    loginPasswordField.value = '';
-                    loginPasswordField.focus();
-                }
-            } catch (err) {
-                console.error('[Login] Unexpected error in form handler:', err);
-                loginErrorDiv.textContent = 'Error: ' + err.message;
-                loginErrorDiv.style.display = 'block';
-            } finally {
-                // Restore button state
-                if (loginSubmitBtn) {
-                    loginSubmitBtn.disabled = false;
-                    loginSubmitBtn.textContent = originalBtnText;
-                }
-            }
+            console.log('[Login] Google login clicked');
+            initiateGoogleAuth();
         });
     }
 
     // Logout button
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            dashboardPassword = '';
-            sessionStorage.removeItem('dashboardPassword');
-            stopAutoRefresh();
-            stopCronAutoRefresh();
-            location.reload();
-        });
+        logoutBtn.addEventListener('click', handleLogout);
     }
 
     // Smart polling: listen for tab visibility changes

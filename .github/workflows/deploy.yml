@@ -64,15 +64,23 @@ jobs:
         env:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
           node -e "
             const fs = require('fs');
             const content = fs.readFileSync('wrangler.toml', 'utf8');
             const dbId = process.env.DB_ID;
             const password = process.env.PASSWORD;
+            const googleClientId = process.env.GOOGLE_CLIENT_ID || 'placeholder';
+            const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || 'placeholder';
+            const sessionSecret = process.env.SESSION_SECRET || 'placeholder';
             const updated = content
               .replace(/your-database-id-here/g, dbId)
-              .replace(/your-password-here/g, password);
+              .replace(/your-password-here/g, password)
+              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
+              .replace(/placeholder/g, googleClientId);
             fs.writeFileSync('wrangler.toml', updated);
           "
 
@@ -82,7 +90,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env staging
+          command: deploy --env staging --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
 
       - name: Run D1 Migrations on Staging
         continue-on-error: true
@@ -104,27 +112,25 @@ jobs:
         run: sleep 10
 
       - name: Test Staging API
-        env:
-          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
           echo "Testing staging API..."
           STAGING_URL="https://taskboard-api-staging.rei-workers.workers.dev"
           
-          # Test 1: Health check (no auth)
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/tasks" || echo "000")
-          if [ "$HTTP_CODE" = "401" ]; then
-            echo "✅ Auth required (correct)"
+          # Test 1: Auth endpoints respond
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/auth/google" || echo "000")
+          if [ "$HTTP_CODE" = "302" ]; then
+            echo "✅ OAuth endpoint redirects (correct)"
           else
-            echo "❌ Expected 401, got $HTTP_CODE"
+            echo "❌ Expected 302, got $HTTP_CODE"
             exit 1
           fi
           
-          # Test 2: With auth
-          RESPONSE=$(curl -s -H "X-Dashboard-Password: $PASSWORD" "$STAGING_URL/tasks")
-          if echo "$RESPONSE" | grep -q "tasks"; then
-            echo "✅ API returns tasks"
+          # Test 2: Protected routes require auth
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/tasks" || echo "000")
+          if [ "$HTTP_CODE" = "401" ]; then
+            echo "✅ Protected routes require auth (correct)"
           else
-            echo "❌ API did not return expected response"
+            echo "❌ Expected 401, got $HTTP_CODE"
             exit 1
           fi
           
@@ -157,15 +163,23 @@ jobs:
         env:
           DB_ID: ${{ secrets.D1_DATABASE_ID }}
           PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
           node -e "
             const fs = require('fs');
             const content = fs.readFileSync('wrangler.toml', 'utf8');
             const dbId = process.env.DB_ID;
             const password = process.env.PASSWORD;
+            const googleClientId = process.env.GOOGLE_CLIENT_ID || 'placeholder';
+            const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || 'placeholder';
+            const sessionSecret = process.env.SESSION_SECRET || 'placeholder';
             const updated = content
               .replace(/your-database-id-here/g, dbId)
-              .replace(/your-password-here/g, password);
+              .replace(/your-password-here/g, password)
+              .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.SESSION_KV_NAMESPACE_ID }}')
+              .replace(/placeholder/g, googleClientId);
             fs.writeFileSync('wrangler.toml', updated);
           "
 
@@ -175,7 +189,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env production
+          command: deploy --env production --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
 
       - name: Run D1 Migrations on Production
         uses: cloudflare/wrangler-action@v3
@@ -210,16 +224,17 @@ jobs:
         run: sleep 30
 
       - name: Test Production API
-        env:
-          PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
           echo "Testing production API..."
           PROD_URL="https://taskboard-api.rei-workers.workers.dev"
           
           # Test 1: API responds (with retries)
           for i in 1 2 3; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/tasks" || echo "000")
-            if [ "$HTTP_CODE" != "000" ] && [ "$HTTP_CODE" != "502" ] && [ "$HTTP_CODE" != "503" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/auth/google" || echo "000")
+            if [ "$HTTP_CODE" = "302" ]; then
+              echo "✅ OAuth endpoint responding (HTTP $HTTP_CODE)"
+              break
+            elif [ "$HTTP_CODE" != "000" ] && [ "$HTTP_CODE" != "502" ] && [ "$HTTP_CODE" != "503" ]; then
               echo "✅ API responding (HTTP $HTTP_CODE)"
               break
             elif [ "$i" = "3" ]; then
@@ -230,12 +245,12 @@ jobs:
             fi
           done
           
-          # Test 2: With auth returns tasks
-          RESPONSE=$(curl -s -H "X-Dashboard-Password: $PASSWORD" "$PROD_URL/tasks")
-          if echo "$RESPONSE" | grep -q "tasks"; then
-            echo "✅ API returns tasks"
+          # Test 2: Protected routes require auth
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/tasks" || echo "000")
+          if [ "$HTTP_CODE" = "401" ]; then
+            echo "✅ Protected routes require auth"
           else
-            echo "⚠️ API did not return expected response (may need to seed database)"
+            echo "⚠️ Expected 401, got $HTTP_CODE"
           fi
           
           echo "✅ Production smoke tests completed"
