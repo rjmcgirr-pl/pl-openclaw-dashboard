@@ -125,6 +125,8 @@ function hideLoginModal() {
 let oauthPopup = null;
 
 function initiateGoogleAuth() {
+    console.log('[OAuth] Initiating Google OAuth...');
+    
     // Clear any previous error
     const errorDiv = document.getElementById('loginError');
     if (errorDiv) {
@@ -136,11 +138,22 @@ function initiateGoogleAuth() {
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     
+    console.log('[OAuth] Opening popup to:', `${API_BASE_URL}/auth/google`);
+    
     oauthPopup = window.open(
         `${API_BASE_URL}/auth/google`,
         'googleOAuth',
         `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,location=no,status=no`
     );
+    
+    // Check if popup was blocked
+    if (!oauthPopup || oauthPopup.closed || typeof oauthPopup.closed === 'undefined') {
+        console.error('[OAuth] Popup was blocked!');
+        showLoginError('Popup blocked. Please allow popups for this site and try again.');
+        return;
+    }
+    
+    console.log('[OAuth] Popup opened successfully');
     
     // Start polling to detect if popup is closed
     startOAuthPolling();
@@ -592,12 +605,17 @@ function setupEventListeners() {
 
     // Google Login button
     const googleLoginBtn = document.getElementById('googleLoginBtn');
+    console.log('[Setup] Google login button found:', !!googleLoginBtn);
     if (googleLoginBtn) {
         googleLoginBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            console.log('[Login] Google login clicked');
+            e.stopPropagation();
+            console.log('[Login] Google login button clicked');
             initiateGoogleAuth();
         });
+        console.log('[Setup] Google login listener attached');
+    } else {
+        console.error('[Setup] Google login button NOT found in DOM');
     }
 
     // Logout button
@@ -1372,5 +1390,9 @@ window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
 window.openMarkdownEditor = openMarkdownEditor;
 
-// Start the app
-init();
+// Start the app when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
