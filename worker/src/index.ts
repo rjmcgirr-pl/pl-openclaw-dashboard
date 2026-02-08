@@ -51,7 +51,10 @@ function errorResponse(message: string, status = 400): Response {
 const VALID_MODELS = [
   'google/gemini-3-flash-preview',
   'anthropic/claude-opus-4-5',
-  'openrouter/auto'
+  'openrouter/auto',
+  'openrouter/moonshotai/kimi-k2.5',
+  'anthropic/claude-sonnet-4-5',
+  'openrouter/anthropic/claude-sonnet-4-5'
 ] as const;
 
 const VALID_THINKING_LEVELS = ['low', 'medium', 'high'] as const;
