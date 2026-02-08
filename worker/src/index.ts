@@ -48,13 +48,39 @@ function errorResponse(message: string, status = 400): Response {
 }
 
 // Validation helpers for OpenClaw cron job configuration
+// Full list of models supported by OpenClaw
 const VALID_MODELS = [
+  // Google Gemini
   'google/gemini-3-flash-preview',
-  'anthropic/claude-opus-4-5',
-  'openrouter/auto',
-  'openrouter/moonshotai/kimi-k2.5',
+  'google/gemini-3-pro',
+  'google/gemini-2.0-flash',
+  // Anthropic Claude
   'anthropic/claude-sonnet-4-5',
-  'openrouter/anthropic/claude-sonnet-4-5'
+  'anthropic/claude-opus-4-5',
+  'anthropic/claude-3-5-sonnet',
+  'anthropic/claude-3-opus',
+  'anthropic/claude-3-haiku',
+  // OpenRouter routing
+  'openrouter/auto',
+  // OpenRouter - Google
+  'openrouter/google/gemini-3-flash-preview',
+  'openrouter/google/gemini-3-pro',
+  'openrouter/google/gemini-2.0-flash',
+  // OpenRouter - Anthropic
+  'openrouter/anthropic/claude-sonnet-4-5',
+  'openrouter/anthropic/claude-opus-4-5',
+  'openrouter/anthropic/claude-3-5-sonnet',
+  'openrouter/anthropic/claude-3-opus',
+  'openrouter/anthropic/claude-3-haiku',
+  // OpenRouter - Moonshot
+  'openrouter/moonshotai/kimi-k2.5',
+  'openrouter/moonshotai/kimi-k1.5',
+  // OpenRouter - Other
+  'openrouter/meta-llama/llama-3.3-70b',
+  'openrouter/meta-llama/llama-3.1-405b',
+  'openrouter/deepseek/deepseek-chat',
+  'openrouter/deepseek/deepseek-coder',
+  'openrouter/qwen/qwen-2.5-72b'
 ] as const;
 
 const VALID_THINKING_LEVELS = ['low', 'medium', 'high'] as const;
