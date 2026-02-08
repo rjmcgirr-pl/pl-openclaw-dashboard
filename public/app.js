@@ -2,7 +2,7 @@
 // Configure this to point to your Worker API
 // Production API URL - change this if your Worker is on a different domain
 const API_BASE_URL = window.API_BASE_URL || 'https://taskboard-api.rei-workers.workers.dev';
-const GOOGLE_CLIENT_ID = import.meta.env?.VITE_GOOGLE_AUTH_CLIENT_ID || window.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || '';
 
 // Debug logging - visible on page
 function debugLog(msg) {
