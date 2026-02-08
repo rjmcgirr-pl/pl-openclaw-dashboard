@@ -87,11 +87,14 @@ jobs:
 
       - name: Deploy Worker to Staging
         uses: cloudflare/wrangler-action@v3
+        env:
+          GOOGLE_AUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env staging --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+          command: deploy --env staging
 
       - name: Run D1 Migrations on Staging
         continue-on-error: true
@@ -187,11 +190,14 @@ jobs:
 
       - name: Deploy Worker to Production
         uses: cloudflare/wrangler-action@v3
+        env:
+          GOOGLE_AUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ./worker
-          command: deploy --env production --secret GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }} --secret SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+          command: deploy --env production
 
       - name: Run D1 Migrations on Production
         uses: cloudflare/wrangler-action@v3
