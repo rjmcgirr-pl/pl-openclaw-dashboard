@@ -363,7 +363,7 @@ export default {
         // GET /tasks/:id - Get single task
         if (method === 'GET') {
           console.log(`[route] GET /tasks/${taskId} - entering getTask`);
-          return await getTask(env, taskId);
+          return await getTask(env, taskId, request);
         }
 
         // PATCH /tasks/:id - Update task
