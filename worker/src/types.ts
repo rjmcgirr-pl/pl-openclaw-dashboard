@@ -46,6 +46,7 @@ export interface CronJob {
   description: string | null;
   schedule: string;
   skill_md_path: string | null;
+  skill_md_content: string | null;
   last_run_at: string | null;
   last_status: CronJobStatus;
   last_output: string | null;
@@ -67,6 +68,7 @@ export interface CreateCronJobRequest {
   description?: string;
   schedule: string;
   skill_md_path?: string;
+  skill_md_content?: string;
   last_status?: CronJobStatus;
   last_run_at?: string | null;
   next_run_at?: string | null;

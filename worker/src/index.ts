@@ -505,16 +505,17 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
     const description = body.description || null;
     const schedule = body.schedule.trim();
     const skillMdPath = body.skill_md_path || null;
+    const skillMdContent = body.skill_md_content || null;
     const lastStatus = body.last_status || 'pending';
 
-    console.log('[createCronJob] Prepared values:', { name, description, schedule, skillMdPath, lastStatus });
+    console.log('[createCronJob] Prepared values:', { name, description, schedule, skillMdPath, skillMdContent: skillMdContent ? '[content present]' : null, lastStatus });
 
     let result;
     try {
       result = await env.DB.prepare(
-        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, last_status) 
-         VALUES (?, ?, ?, ?, ?)`
-      ).bind(name, description, schedule, skillMdPath, lastStatus).run();
+        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, last_status) 
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(name, description, schedule, skillMdPath, skillMdContent, lastStatus).run();
       console.log('[createCronJob] Insert result:', JSON.stringify(result));
     } catch (insertError) {
       console.error('[createCronJob] Database insert failed:', insertError);
@@ -601,6 +602,11 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     if (body.skill_md_path !== undefined) {
       updates.push('skill_md_path = ?');
       values.push(body.skill_md_path || null);
+    }
+
+    if (body.skill_md_content !== undefined) {
+      updates.push('skill_md_content = ?');
+      values.push(body.skill_md_content || null);
     }
 
     if (updates.length === 0) {
@@ -826,13 +832,14 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
       
       try {
         const result = await env.DB.prepare(
-          `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, last_status) 
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, last_status) 
+           VALUES (?, ?, ?, ?, ?, ?)`
         ).bind(
           job.name,
           job.description || null,
           job.schedule,
           job.skill_md_path || null,
+          job.skill_md_content || null,
           job.last_status || 'pending'
         ).run();
         console.log(`[syncCronJobs] Job ${job.name} inserted, row ID: ${result.meta?.last_row_id}`);

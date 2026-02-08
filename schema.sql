@@ -27,6 +27,7 @@ CREATE TABLE cron_jobs (
     description TEXT,
     schedule TEXT NOT NULL,
     skill_md_path TEXT,
+    skill_md_content TEXT,
     last_run_at DATETIME,
     last_status TEXT DEFAULT 'pending',
     last_output TEXT,
