@@ -748,6 +748,195 @@ form {
     margin-top: 4px;
 }
 
+/* Cron Job Modal - Extended Content */
+.cron-modal-content {
+    max-width: 700px;
+    width: 95%;
+}
+
+/* Form Sections */
+.form-section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.form-section:last-of-type {
+    border-bottom: none;
+}
+
+.form-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent-primary);
+    display: inline-block;
+}
+
+/* Payload Counter */
+.payload-counter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.validation-error {
+    color: var(--accent-danger);
+    font-weight: 500;
+}
+
+/* Toggle Switch */
+.toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toggle-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--border-color);
+    transition: .3s;
+    border-radius: 26px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--accent-success);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.toggle-switch input:focus + .toggle-slider {
+    box-shadow: 0 0 1px var(--accent-success);
+}
+
+/* Cron Job Config Badges */
+.cron-job-config-badges {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.cron-config-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+    background-color: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.cron-config-badge.model {
+    background-color: rgba(88, 166, 255, 0.15);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.cron-config-badge.timeout {
+    background-color: rgba(210, 153, 34, 0.15);
+    border-color: var(--accent-warning);
+    color: var(--accent-warning);
+}
+
+.cron-config-badge.thinking {
+    background-color: rgba(139, 148, 158, 0.2);
+    border-color: var(--text-secondary);
+    color: var(--text-secondary);
+}
+
+.cron-config-badge.deliver-off {
+    background-color: rgba(218, 54, 51, 0.15);
+    border-color: var(--accent-danger);
+    color: var(--accent-danger);
+}
+
+/* Payload Preview in Cron Job Card */
+.cron-payload-preview {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+}
+
+.payload-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.payload-preview-icon {
+    font-size: 14px;
+}
+
+.payload-preview-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.payload-preview-size {
+    color: var(--text-secondary);
+}
+
+.payload-preview-content {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 100px;
+    overflow: hidden;
+    line-height: 1.4;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .board {
@@ -778,6 +967,32 @@ form {
     .cron-job-meta {
         flex-wrap: wrap;
     }
+    
+    .cron-job-config-badges {
+        margin-top: 4px;
+    }
+    
+    .cron-config-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+
+    /* Cron modal responsive */
+    .cron-modal-content {
+        max-width: 100%;
+        margin: 10px;
+        max-height: 95vh;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .toggle-group {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+    }
 }
 
 @media (max-width: 480px) {
@@ -807,6 +1022,26 @@ form {
 
     .stat-value {
         font-size: 20px;
+    }
+
+    .cron-modal-content {
+        width: 100%;
+        margin: 0;
+        border-radius: 0;
+        max-height: 100vh;
+    }
+
+    .form-section-title {
+        font-size: 13px;
+    }
+
+    .cron-job-config-badges {
+        gap: 4px;
+    }
+
+    .cron-config-badge {
+        font-size: 9px;
+        padding: 2px 5px;
     }
 }
 

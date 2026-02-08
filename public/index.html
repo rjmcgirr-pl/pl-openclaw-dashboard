@@ -156,36 +156,102 @@
 
     <!-- Cron Job Modal -->
     <div id="cronJobModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content cron-modal-content">
             <div class="modal-header">
                 <h2 id="cronModalTitle">New Cron Job</h2>
                 <button class="close-btn" id="closeCronModal">&times;</button>
             </div>
             <form id="cronJobForm">
                 <input type="hidden" id="cronJobId">
-                <div class="form-group">
-                    <label for="cronJobName">Name *</label>
-                    <input type="text" id="cronJobName" required placeholder="e.g., Daily Backup">
+                
+                <!-- Section 1: Basic Information -->
+                <div class="form-section">
+                    <div class="form-section-title">📋 Basic Information</div>
+                    <div class="form-group">
+                        <label for="cronJobName">Name *</label>
+                        <input type="text" id="cronJobName" required placeholder="e.g., Daily Backup">
+                    </div>
+                    <div class="form-group">
+                        <label for="cronJobDescription">Description</label>
+                        <textarea id="cronJobDescription" rows="2" placeholder="What does this cron job do?"></textarea>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="cronJobDescription">Description</label>
-                    <textarea id="cronJobDescription" rows="2" placeholder="What does this cron job do?"></textarea>
+
+                <!-- Section 2: Schedule -->
+                <div class="form-section">
+                    <div class="form-section-title">⏰ Schedule</div>
+                    <div class="form-group">
+                        <label for="cronJobSchedule">Schedule *</label>
+                        <input type="text" id="cronJobSchedule" required placeholder="e.g., 0 9 * * * (cron expression)">
+                        <span class="form-hint">Cron expression: minute hour day month weekday</span>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="cronJobSchedule">Schedule *</label>
-                    <input type="text" id="cronJobSchedule" required placeholder="e.g., 0 9 * * * (cron expression)">
-                    <span class="form-hint">Cron expression: minute hour day month weekday</span>
+
+                <!-- Section 3: Task Instructions -->
+                <div class="form-section">
+                    <div class="form-section-title">📝 Task Instructions (Payload) *</div>
+                    <div class="form-group">
+                        <label for="cronJobPayload">Instructions *</label>
+                        <textarea id="cronJobPayload" rows="8" placeholder="Enter the task instructions for the agent..."></textarea>
+                        <div class="payload-counter">
+                            <span id="payloadCharCount">0</span> / 100KB
+                            <span id="payloadError" class="validation-error" style="display: none;">Payload exceeds 100KB limit</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="cronJobSkillPath">Skill MD Path</label>
-                    <input type="text" id="cronJobSkillPath" placeholder="e.g., skills/backup.md">
-                    <span class="form-hint">Optional path to the skill documentation</span>
+
+                <!-- Section 4: Agent Configuration -->
+                <div class="form-section">
+                    <div class="form-section-title">⚙️ Agent Configuration</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="cronJobModel">Model</label>
+                            <select id="cronJobModel">
+                                <option value="google/gemini-3-flash-preview">Google Gemini Flash</option>
+                                <option value="anthropic/claude-opus-4-5">Claude Opus</option>
+                                <option value="openrouter/auto">OpenRouter Auto</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="cronJobThinking">Thinking Level</label>
+                            <select id="cronJobThinking">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="cronJobTimeout">Timeout (seconds)</label>
+                            <input type="number" id="cronJobTimeout" min="60" max="3600" value="300" placeholder="60-3600">
+                            <span id="timeoutError" class="validation-error" style="display: none;">Must be between 60-3600 seconds</span>
+                        </div>
+                        <div class="form-group toggle-group">
+                            <label for="cronJobDeliver" class="toggle-label">Deliver to Channel</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="cronJobDeliver" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="cronJobSkillMdContent">Skill.md Content</label>
-                    <textarea id="cronJobSkillMdContent" rows="5" placeholder="Enter markdown content for this cron job..."></textarea>
-                    <span class="form-hint">Optional - max 100KB</span>
+
+                <!-- Section 5: Skill Reference -->
+                <div class="form-section">
+                    <div class="form-section-title">📎 Skill Reference (Optional)</div>
+                    <div class="form-group">
+                        <label for="cronJobSkillPath">Skill MD Path</label>
+                        <input type="text" id="cronJobSkillPath" placeholder="e.g., skills/backup.md">
+                        <span class="form-hint">Optional path to the skill documentation</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronJobSkillMdContent">Skill.md Content</label>
+                        <textarea id="cronJobSkillMdContent" rows="4" placeholder="Enter markdown content for this cron job..."></textarea>
+                        <span class="form-hint">Optional - max 100KB</span>
+                    </div>
                 </div>
+
                 <div class="form-actions">
                     <button type="button" id="deleteCronJobBtn" class="btn-danger" style="display: none;">Delete</button>
                     <button type="submit" class="btn-primary">Save Cron Job</button>

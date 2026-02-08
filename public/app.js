@@ -674,6 +674,33 @@ function createCronJobCard(job) {
         `;
     }
 
+    // Build config badges
+    const modelBadge = `<span class="cron-config-badge model">${getModelDisplayName(job.model)}</span>`;
+    const timeoutBadge = `<span class="cron-config-badge timeout">⏱️ ${job.timeout_seconds || 300}s</span>`;
+    const thinkingBadge = job.thinking && job.thinking !== 'low' 
+        ? `<span class="cron-config-badge thinking">🧠 ${job.thinking}</span>` 
+        : '';
+    const deliverBadge = job.deliver === false 
+        ? `<span class="cron-config-badge deliver-off">📵 No delivery</span>` 
+        : '';
+
+    // Payload preview (truncated)
+    let payloadPreview = '';
+    if (job.payload) {
+        const previewText = job.payload.substring(0, 200);
+        const isTruncated = job.payload.length > 200;
+        payloadPreview = `
+            <div class="cron-payload-preview">
+                <div class="payload-preview-header">
+                    <span class="payload-preview-icon">📝</span>
+                    <span class="payload-preview-title">Task Instructions</span>
+                    <span class="payload-preview-size">(${(job.payload.length / 1024).toFixed(1)} KB)</span>
+                </div>
+                <div class="payload-preview-content">${escapeHtml(previewText)}${isTruncated ? '...' : ''}</div>
+            </div>
+        `;
+    }
+
     return `
         <div class="cron-job-card" data-cron-id="${job.id}">
             <div class="cron-job-header">
@@ -685,7 +712,12 @@ function createCronJobCard(job) {
                             <span>⏱️ ${escapeHtml(job.schedule)}</span>
                             <span>🕐 Last: ${lastRun}</span>
                             ${job.skill_md_path ? `<span>📎 <a href="${escapeHtml(job.skill_md_path)}" target="_blank">skill.md</a></span>` : ''}
-                            ${job.skill_md_content ? `<span>📝 Content (${(job.skill_md_content.length / 1024).toFixed(1)} KB)</span>` : ''}
+                        </div>
+                        <div class="cron-job-config-badges">
+                            ${modelBadge}
+                            ${timeoutBadge}
+                            ${thinkingBadge}
+                            ${deliverBadge}
                         </div>
                     </div>
                     <span class="cron-job-badge ${job.last_status}">${statusLabel}</span>
@@ -694,10 +726,11 @@ function createCronJobCard(job) {
             </div>
             <div class="cron-job-details">
                 ${job.description ? `<div class="cron-job-description">${escapeHtml(job.description)}</div>` : ''}
+                ${payloadPreview}
                 ${skillMdPreview}
                 <div class="cron-job-output">${job.last_output ? escapeHtml(job.last_output) : ''}</div>
                 <div class="cron-job-actions">
-                    <button class="btn-secondary" onclick="editCronJob(${job.id})">Edit</button>
+                    <button class="btn-secondary" onclick="editCronJob(${job.id})">Edit Config</button>
                     <button class="btn-secondary" onclick="openMarkdownEditor(${job.id})">Edit Skill.md</button>
                     <button class="btn-primary" onclick="runCronJob(${job.id})">Run Now</button>
                 </div>
@@ -784,6 +817,18 @@ function openNewCronModal() {
     document.getElementById('cronJobForm').reset();
     document.getElementById('cronJobId').value = '';
     document.getElementById('deleteCronJobBtn').style.display = 'none';
+    
+    // Set default values for new fields
+    document.getElementById('cronJobModel').value = 'google/gemini-3-flash-preview';
+    document.getElementById('cronJobThinking').value = 'low';
+    document.getElementById('cronJobTimeout').value = '300';
+    document.getElementById('cronJobDeliver').checked = true;
+    
+    // Reset validation errors
+    document.getElementById('payloadError').style.display = 'none';
+    document.getElementById('timeoutError').style.display = 'none';
+    updatePayloadCharCount();
+    
     document.getElementById('cronJobModal').classList.add('active');
 }
 
@@ -798,6 +843,19 @@ function editCronJob(id) {
     document.getElementById('cronJobSchedule').value = job.schedule;
     document.getElementById('cronJobSkillPath').value = job.skill_md_path || '';
     document.getElementById('cronJobSkillMdContent').value = job.skill_md_content || '';
+    
+    // Populate new OpenClaw config fields
+    document.getElementById('cronJobPayload').value = job.payload || '';
+    document.getElementById('cronJobModel').value = job.model || 'google/gemini-3-flash-preview';
+    document.getElementById('cronJobThinking').value = job.thinking || 'low';
+    document.getElementById('cronJobTimeout').value = job.timeout_seconds || 300;
+    document.getElementById('cronJobDeliver').checked = job.deliver !== false;
+    
+    // Reset validation errors
+    document.getElementById('payloadError').style.display = 'none';
+    document.getElementById('timeoutError').style.display = 'none';
+    updatePayloadCharCount();
+    
     document.getElementById('deleteCronJobBtn').style.display = 'block';
     document.getElementById('cronJobModal').classList.add('active');
 }
@@ -833,7 +891,29 @@ function setupCronEventListeners() {
         cronJobForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            // Get all form values
             const skillMdContent = document.getElementById('cronJobSkillMdContent').value;
+            const payload = document.getElementById('cronJobPayload').value;
+            const timeout = parseInt(document.getElementById('cronJobTimeout').value, 10);
+
+            // Validate payload (required, max 100KB)
+            if (!payload.trim()) {
+                showError('Task instructions (payload) are required.');
+                document.getElementById('cronJobPayload').focus();
+                return;
+            }
+            if (payload.length > 100000) {
+                showError('Payload exceeds 100KB limit. Please reduce the size.');
+                document.getElementById('cronJobPayload').focus();
+                return;
+            }
+
+            // Validate timeout range
+            if (isNaN(timeout) || timeout < 60 || timeout > 3600) {
+                showError('Timeout must be between 60 and 3600 seconds.');
+                document.getElementById('cronJobTimeout').focus();
+                return;
+            }
 
             // Validate size
             if (skillMdContent.length > 100000) {
@@ -847,6 +927,12 @@ function setupCronEventListeners() {
                 schedule: document.getElementById('cronJobSchedule').value.trim(),
                 skill_md_path: document.getElementById('cronJobSkillPath').value.trim() || undefined,
                 skill_md_content: skillMdContent || undefined,
+                // New OpenClaw config fields
+                payload: payload.trim(),
+                model: document.getElementById('cronJobModel').value,
+                thinking: document.getElementById('cronJobThinking').value,
+                timeout_seconds: timeout,
+                deliver: document.getElementById('cronJobDeliver').checked,
             };
 
             const id = document.getElementById('cronJobId').value;
@@ -856,6 +942,22 @@ function setupCronEventListeners() {
                 await createCronJob(cronJobData);
             }
         });
+    }
+
+    // Payload textarea event listeners
+    const cronJobPayload = document.getElementById('cronJobPayload');
+    const cronJobTimeout = document.getElementById('cronJobTimeout');
+    
+    if (cronJobPayload) {
+        cronJobPayload.addEventListener('input', () => {
+            updatePayloadCharCount();
+            autoResizeTextarea(cronJobPayload);
+        });
+    }
+
+    if (cronJobTimeout) {
+        cronJobTimeout.addEventListener('input', validateTimeout);
+        cronJobTimeout.addEventListener('blur', validateTimeout);
     }
     
     // Delete cron job button
@@ -1055,6 +1157,60 @@ async function saveMarkdownContent() {
         showError('Failed to save skill.md content: ' + error.message);
         showToast('Failed to save: ' + error.message, 'error');
     }
+}
+
+// Payload character counter
+function updatePayloadCharCount() {
+    const textarea = document.getElementById('cronJobPayload');
+    const countSpan = document.getElementById('payloadCharCount');
+    const errorSpan = document.getElementById('payloadError');
+    
+    if (!textarea || !countSpan) return;
+    
+    const count = textarea.value.length;
+    countSpan.textContent = count.toLocaleString();
+    
+    // Visual feedback
+    if (count > 100000) {
+        countSpan.style.color = '#ff6b6b';
+        if (errorSpan) errorSpan.style.display = 'inline';
+    } else if (count > 90000) {
+        countSpan.style.color = '#ffd93d';
+        if (errorSpan) errorSpan.style.display = 'none';
+    } else {
+        countSpan.style.color = '';
+        if (errorSpan) errorSpan.style.display = 'none';
+    }
+}
+
+// Timeout validation
+function validateTimeout() {
+    const input = document.getElementById('cronJobTimeout');
+    const errorSpan = document.getElementById('timeoutError');
+    
+    if (!input || !errorSpan) return;
+    
+    const value = parseInt(input.value, 10);
+    
+    if (isNaN(value) || value < 60 || value > 3600) {
+        errorSpan.style.display = 'inline';
+        input.style.borderColor = '#ff6b6b';
+    } else {
+        errorSpan.style.display = 'none';
+        input.style.borderColor = '';
+    }
+}
+
+// Model display names
+const MODEL_DISPLAY_NAMES = {
+    'google/gemini-3-flash-preview': '⚡ Gemini Flash',
+    'anthropic/claude-opus-4-5': '🧠 Claude Opus',
+    'openrouter/auto': '🔀 OpenRouter Auto'
+};
+
+// Get model display name
+function getModelDisplayName(model) {
+    return MODEL_DISPLAY_NAMES[model] || model || '⚡ Gemini Flash';
 }
 
 function showToast(message, type = 'info') {
