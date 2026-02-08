@@ -1406,35 +1406,21 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+// Start the app when DOM is ready - CRITICAL: must wait for debugLog element
+function startApp() {
+    debugLog('Script loaded, DOM ready');
+    init();
+}
+
 // Make functions available globally for inline onclick handlers
 window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
 window.openMarkdownEditor = openMarkdownEditor;
 window.initiateGoogleAuth = initiateGoogleAuth;
 
-// Debug: Add visible status to page
-function addDebugStatus() {
-    const debugDiv = document.createElement('div');
-    debugDiv.id = 'debugStatus';
-    debugDiv.style.cssText = 'position:fixed;bottom:10px;right:10px;background:#333;color:#fff;padding:10px;border-radius:4px;font-size:12px;z-index:9999;max-width:300px;';
-    debugDiv.innerHTML = `
-        <div><strong>Debug Status</strong></div>
-        <div id="debugApiUrl">API: ${API_BASE_URL}</div>
-        <div id="debugScriptLoaded">Script: Loaded ✓</div>
-        <div id="debugInitCalled">Init: Waiting...</div>
-        <div id="debugAuthCheck">Auth: Checking...</div>
-        <div id="debugButton">Button: ${document.getElementById('googleLoginBtn') ? 'Found ✓' : 'NOT FOUND ✗'}</div>
-    `;
-    document.body.appendChild(debugDiv);
-}
-
 // Start the app when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        addDebugStatus();
-        init();
-    });
+    document.addEventListener('DOMContentLoaded', startApp);
 } else {
-    addDebugStatus();
-    init();
+    startApp();
 }
