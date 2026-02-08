@@ -550,20 +550,65 @@ function setupEventListeners() {
             location.reload();
         });
     }
+
+    // Smart polling: listen for tab visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
-// Auto-refresh
+// Smart polling configuration
+const REFRESH_INTERVAL_ACTIVE = 60000;  // 60 seconds when tab is visible
+const REFRESH_INTERVAL_IDLE = 300000;   // 5 minutes when tab is hidden
+
+// Auto-refresh with smart polling
 function startAutoRefresh() {
-    // Refresh every 30 seconds
+    // Clear any existing interval
+    stopAutoRefresh();
+    
+    // Set initial interval based on current visibility
+    const interval = document.hidden ? REFRESH_INTERVAL_IDLE : REFRESH_INTERVAL_ACTIVE;
+    
     autoRefreshInterval = setInterval(() => {
         loadTasks();
-    }, 30000);
+    }, interval);
+    
+    console.log(`[AutoRefresh] Started with ${interval/1000}s interval (hidden: ${document.hidden})`);
 }
 
 function stopAutoRefresh() {
     if (autoRefreshInterval) {
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
+    }
+}
+
+// Handle visibility change for smart polling
+function handleVisibilityChange() {
+    if (document.hidden) {
+        // Tab is hidden - slow down polling
+        console.log('[Visibility] Tab hidden, slowing to 5min interval');
+        stopAutoRefresh();
+        stopCronAutoRefresh();
+        autoRefreshInterval = setInterval(() => {
+            loadTasks();
+        }, REFRESH_INTERVAL_IDLE);
+        cronRefreshInterval = setInterval(() => {
+            if (currentTab === 'cron') {
+                loadCronJobs();
+            }
+        }, REFRESH_INTERVAL_IDLE);
+    } else {
+        // Tab is visible - speed up polling
+        console.log('[Visibility] Tab visible, speeding to 60s interval');
+        stopAutoRefresh();
+        stopCronAutoRefresh();
+        autoRefreshInterval = setInterval(() => {
+            loadTasks();
+        }, REFRESH_INTERVAL_ACTIVE);
+        cronRefreshInterval = setInterval(() => {
+            if (currentTab === 'cron') {
+                loadCronJobs();
+            }
+        }, REFRESH_INTERVAL_ACTIVE);
     }
 }
 
@@ -1018,12 +1063,19 @@ function setupCronEventListeners() {
 }
 
 function startCronAutoRefresh() {
-    // Refresh every 30 seconds
+    // Clear any existing interval
+    stopCronAutoRefresh();
+    
+    // Set initial interval based on current visibility
+    const interval = document.hidden ? REFRESH_INTERVAL_IDLE : REFRESH_INTERVAL_ACTIVE;
+    
     cronRefreshInterval = setInterval(() => {
         if (currentTab === 'cron') {
             loadCronJobs();
         }
-    }, 30000);
+    }, interval);
+    
+    console.log(`[CronAutoRefresh] Started with ${interval/1000}s interval (hidden: ${document.hidden})`);
 }
 
 function stopCronAutoRefresh() {
