@@ -615,8 +615,6 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
     const name = body.name.trim();
     const description = body.description || null;
     const schedule = body.schedule.trim();
-    const skillMdPath = body.skill_md_path || null;
-    const skillMdContent = body.skill_md_content || null;
     const lastStatus = body.last_status || 'pending';
     
     // OpenClaw configuration with defaults
@@ -627,18 +625,18 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
     const deliver = body.deliver ?? true;
 
     console.log('[createCronJob] Prepared values:', { 
-      name, description, schedule, skillMdPath, skillMdContent: skillMdContent ? '[content present]' : null, 
+      name, description, schedule,
       lastStatus, payload: payload.substring(0, 50) + '...', model, thinking, timeoutSeconds, deliver 
     });
 
     let result;
     try {
       result = await env.DB.prepare(
-        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, 
+        `INSERT INTO cron_jobs (name, description, schedule, 
          payload, model, thinking, timeout_seconds, deliver, last_status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        name, description, schedule, skillMdPath, skillMdContent, 
+        name, description, schedule, 
         payload, model, thinking, timeoutSeconds, deliver ? 1 : 0, lastStatus
       ).run();
       console.log('[createCronJob] Insert result:', JSON.stringify(result));
@@ -722,16 +720,6 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     if (body.schedule !== undefined) {
       updates.push('schedule = ?');
       values.push(body.schedule.trim());
-    }
-
-    if (body.skill_md_path !== undefined) {
-      updates.push('skill_md_path = ?');
-      values.push(body.skill_md_path || null);
-    }
-
-    if (body.skill_md_content !== undefined) {
-      updates.push('skill_md_content = ?');
-      values.push(body.skill_md_content || null);
     }
 
     // OpenClaw configuration updates
@@ -1077,15 +1065,13 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const deliver = job.deliver ?? true;
 
         const result = await env.DB.prepare(
-          `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, 
+          `INSERT INTO cron_jobs (name, description, schedule, 
            payload, model, thinking, timeout_seconds, deliver, last_status) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           job.name,
           job.description || null,
           job.schedule,
-          job.skill_md_path || null,
-          job.skill_md_content || null,
           payload,
           model,
           thinking,
