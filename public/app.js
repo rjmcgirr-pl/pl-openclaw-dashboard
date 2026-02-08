@@ -29,7 +29,7 @@ let cronJobs = [];
 let draggedTask = null;
 let autoRefreshInterval = null;
 let cronRefreshInterval = null;
-let dashboardPassword = sessionStorage.getItem('dashboardPassword') || '';
+let currentUser = null;
 let currentTab = 'tasks';
 
 // DOM Elements
@@ -53,35 +53,52 @@ const taskAssignedField = document.getElementById('taskAssigned');
 async function init() {
     console.log('[Init] Starting dashboard...');
     
-    // ALWAYS set up event listeners first (including login form)
+    // ALWAYS set up event listeners first (including OAuth handlers)
     setupEventListeners();
+    setupOAuthListeners();
     
-    // Check if password is required
-    if (!dashboardPassword) {
-        console.log('[Init] No password found, showing login modal');
-        showLoginModal();
-        return;
-    }
-    
-    // Verify password works by loading tasks
+    // Check if user is authenticated
     try {
-        console.log('[Init] Checking stored password...');
-        await loadTasks();
-        await loadCronJobs();
-        setupDragAndDrop();
-        setupCronEventListeners();
-        startAutoRefresh();
-        startCronAutoRefresh();
+        console.log('[Init] Checking session...');
+        const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+            credentials: 'include'
+        });
         
-        // Show logout button
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) {
-            logoutBtn.style.display = 'block';
+        if (meResponse.ok) {
+            const data = await meResponse.json();
+            currentUser = data.user;
+            console.log('[Init] User authenticated:', currentUser.name);
+            await initializeDashboard();
+        } else {
+            console.log('[Init] No active session, showing login modal');
+            showLoginModal();
         }
-        console.log('[Init] Dashboard initialized successfully');
     } catch (error) {
-        // If auth failed, login modal will be shown by apiRequest
         console.log('[Init] Auth check failed, showing login:', error.message);
+        showLoginModal();
+    }
+}
+
+// Initialize dashboard after authentication
+async function initializeDashboard() {
+    await loadTasks();
+    await loadCronJobs();
+    setupDragAndDrop();
+    setupCronEventListeners();
+    startAutoRefresh();
+    startCronAutoRefresh();
+    updateUserUI();
+    console.log('[Init] Dashboard initialized successfully');
+}
+
+// Update UI with user info
+function updateUserUI() {
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.style.display = 'block';
+        if (currentUser) {
+            logoutBtn.title = `Logout (${currentUser.name})`;
+        }
     }
 }
 
