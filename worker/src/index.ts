@@ -1,4 +1,4 @@
-import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, EndCronJobRequest, CronJobStatus } from './types';
+import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus } from './types';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -45,6 +45,83 @@ function jsonResponse(data: unknown, status = 200, customHeaders?: Record<string
 
 function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ error: message }, status);
+}
+
+// Validation helpers for OpenClaw cron job configuration
+const VALID_MODELS = [
+  'google/gemini-3-flash-preview',
+  'anthropic/claude-opus-4-5',
+  'openrouter/auto'
+] as const;
+
+const VALID_THINKING_LEVELS = ['low', 'medium', 'high'] as const;
+
+const MAX_PAYLOAD_SIZE_BYTES = 100 * 1024; // 100KB
+
+function validatePayload(payload: unknown): { valid: boolean; error?: string } {
+  if (payload === undefined || payload === null) {
+    return { valid: false, error: 'Payload is required' };
+  }
+  if (typeof payload !== 'string') {
+    return { valid: false, error: 'Payload must be a string' };
+  }
+  if (payload.trim() === '') {
+    return { valid: false, error: 'Payload cannot be empty' };
+  }
+  const byteLength = new TextEncoder().encode(payload).length;
+  if (byteLength > MAX_PAYLOAD_SIZE_BYTES) {
+    return { valid: false, error: `Payload exceeds maximum size of 100KB (${byteLength} bytes)` };
+  }
+  return { valid: true };
+}
+
+function validateModel(model: unknown): { valid: boolean; error?: string } {
+  if (model === undefined || model === null) {
+    return { valid: true }; // Uses default
+  }
+  if (typeof model !== 'string') {
+    return { valid: false, error: 'Model must be a string' };
+  }
+  if (!VALID_MODELS.includes(model as typeof VALID_MODELS[number])) {
+    return { valid: false, error: `Invalid model. Must be one of: ${VALID_MODELS.join(', ')}` };
+  }
+  return { valid: true };
+}
+
+function validateThinking(thinking: unknown): { valid: boolean; error?: string } {
+  if (thinking === undefined || thinking === null) {
+    return { valid: true }; // Uses default
+  }
+  if (typeof thinking !== 'string') {
+    return { valid: false, error: 'Thinking must be a string' };
+  }
+  if (!VALID_THINKING_LEVELS.includes(thinking as typeof VALID_THINKING_LEVELS[number])) {
+    return { valid: false, error: `Invalid thinking level. Must be one of: ${VALID_THINKING_LEVELS.join(', ')}` };
+  }
+  return { valid: true };
+}
+
+function validateTimeoutSeconds(timeout: unknown): { valid: boolean; error?: string } {
+  if (timeout === undefined || timeout === null) {
+    return { valid: true }; // Uses default
+  }
+  if (typeof timeout !== 'number' || !Number.isInteger(timeout)) {
+    return { valid: false, error: 'Timeout seconds must be an integer' };
+  }
+  if (timeout < 60 || timeout > 3600) {
+    return { valid: false, error: 'Timeout seconds must be between 60 and 3600' };
+  }
+  return { valid: true };
+}
+
+function validateDeliver(deliver: unknown): { valid: boolean; error?: string } {
+  if (deliver === undefined || deliver === null) {
+    return { valid: true }; // Uses default
+  }
+  if (typeof deliver !== 'boolean') {
+    return { valid: false, error: 'Deliver must be a boolean' };
+  }
+  return { valid: true };
 }
 
 export default {
@@ -501,21 +578,66 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
       return errorResponse('Schedule is required', 400);
     }
 
+    // Validate OpenClaw configuration fields
+    const payloadValidation = validatePayload(body.payload);
+    if (!payloadValidation.valid) {
+      console.log('[createCronJob] Validation failed:', payloadValidation.error);
+      return errorResponse(payloadValidation.error!, 400);
+    }
+
+    const modelValidation = validateModel(body.model);
+    if (!modelValidation.valid) {
+      console.log('[createCronJob] Validation failed:', modelValidation.error);
+      return errorResponse(modelValidation.error!, 400);
+    }
+
+    const thinkingValidation = validateThinking(body.thinking);
+    if (!thinkingValidation.valid) {
+      console.log('[createCronJob] Validation failed:', thinkingValidation.error);
+      return errorResponse(thinkingValidation.error!, 400);
+    }
+
+    const timeoutValidation = validateTimeoutSeconds(body.timeout_seconds);
+    if (!timeoutValidation.valid) {
+      console.log('[createCronJob] Validation failed:', timeoutValidation.error);
+      return errorResponse(timeoutValidation.error!, 400);
+    }
+
+    const deliverValidation = validateDeliver(body.deliver);
+    if (!deliverValidation.valid) {
+      console.log('[createCronJob] Validation failed:', deliverValidation.error);
+      return errorResponse(deliverValidation.error!, 400);
+    }
+
     const name = body.name.trim();
     const description = body.description || null;
     const schedule = body.schedule.trim();
     const skillMdPath = body.skill_md_path || null;
     const skillMdContent = body.skill_md_content || null;
     const lastStatus = body.last_status || 'pending';
+    
+    // OpenClaw configuration with defaults
+    const payload = body.payload.trim();
+    const model = body.model || 'google/gemini-3-flash-preview';
+    const thinking = body.thinking || 'low';
+    const timeoutSeconds = body.timeout_seconds ?? 300;
+    const deliver = body.deliver ?? true;
 
-    console.log('[createCronJob] Prepared values:', { name, description, schedule, skillMdPath, skillMdContent: skillMdContent ? '[content present]' : null, lastStatus });
+    console.log('[createCronJob] Prepared values:', { 
+      name, description, schedule, skillMdPath, skillMdContent: skillMdContent ? '[content present]' : null, 
+      lastStatus, payload: payload.substring(0, 50) + '...', model, thinking, timeoutSeconds, deliver 
+    });
 
     let result;
     try {
       result = await env.DB.prepare(
-        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, last_status) 
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(name, description, schedule, skillMdPath, skillMdContent, lastStatus).run();
+        `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, 
+         payload, model, thinking, timeout_seconds, deliver, last_status) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        name, description, schedule, skillMdPath, skillMdContent, 
+        payload, model, thinking, timeoutSeconds, deliver ? 1 : 0, lastStatus
+      ).run();
       console.log('[createCronJob] Insert result:', JSON.stringify(result));
     } catch (insertError) {
       console.error('[createCronJob] Database insert failed:', insertError);
@@ -567,9 +689,9 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     }
     console.log(`[updateCronJob] Found existing cron job:`, JSON.stringify(existing));
 
-    let body: Partial<CreateCronJobRequest>;
+    let body: Partial<UpdateCronJobRequest>;
     try {
-      body = await request.json() as Partial<CreateCronJobRequest>;
+      body = await request.json() as Partial<UpdateCronJobRequest>;
       console.log('[updateCronJob] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[updateCronJob] Failed to parse request body:', parseError);
@@ -577,7 +699,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     }
 
     const updates: string[] = [];
-    const values: (string | null)[] = [];
+    const values: (string | number | null)[] = [];
 
     // Build dynamic update query
     if (body.name !== undefined) {
@@ -609,12 +731,81 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       values.push(body.skill_md_content || null);
     }
 
-    if (updates.length === 0) {
+    // OpenClaw configuration updates
+    if (body.payload !== undefined) {
+      const payloadValidation = validatePayload(body.payload);
+      if (!payloadValidation.valid) {
+        console.log('[updateCronJob] Validation failed:', payloadValidation.error);
+        return errorResponse(payloadValidation.error!, 400);
+      }
+      updates.push('payload = ?');
+      values.push(body.payload.trim());
+    }
+
+    if (body.model !== undefined) {
+      const modelValidation = validateModel(body.model);
+      if (!modelValidation.valid) {
+        console.log('[updateCronJob] Validation failed:', modelValidation.error);
+        return errorResponse(modelValidation.error!, 400);
+      }
+      updates.push('model = ?');
+      values.push(body.model);
+    }
+
+    if (body.thinking !== undefined) {
+      const thinkingValidation = validateThinking(body.thinking);
+      if (!thinkingValidation.valid) {
+        console.log('[updateCronJob] Validation failed:', thinkingValidation.error);
+        return errorResponse(thinkingValidation.error!, 400);
+      }
+      updates.push('thinking = ?');
+      values.push(body.thinking);
+    }
+
+    if (body.timeout_seconds !== undefined) {
+      const timeoutValidation = validateTimeoutSeconds(body.timeout_seconds);
+      if (!timeoutValidation.valid) {
+        console.log('[updateCronJob] Validation failed:', timeoutValidation.error);
+        return errorResponse(timeoutValidation.error!, 400);
+      }
+      updates.push('timeout_seconds = ?');
+      values.push(body.timeout_seconds);
+    }
+
+    if (body.deliver !== undefined) {
+      const deliverValidation = validateDeliver(body.deliver);
+      if (!deliverValidation.valid) {
+        console.log('[updateCronJob] Validation failed:', deliverValidation.error);
+        return errorResponse(deliverValidation.error!, 400);
+      }
+      updates.push('deliver = ?');
+      values.push(body.deliver ? 1 : 0);
+    }
+
+    if (body.last_status !== undefined) {
+      updates.push('last_status = ?');
+      values.push(body.last_status);
+    }
+
+    if (body.last_run_at !== undefined) {
+      updates.push('last_run_at = ?');
+      values.push(body.last_run_at);
+    }
+
+    if (body.next_run_at !== undefined) {
+      updates.push('next_run_at = ?');
+      values.push(body.next_run_at);
+    }
+
+    // Always update the updated_at timestamp
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+
+    if (updates.length === 1) {
       console.log('[updateCronJob] No fields to update');
       return errorResponse('No fields to update', 400);
     }
 
-    values.push(id.toString());
+    values.push(id);
     console.log(`[updateCronJob] Update query: SET ${updates.join(', ')} WHERE id = ?`);
     console.log('[updateCronJob] Values:', JSON.stringify(values));
 
@@ -830,16 +1021,73 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
       const job = body.cronJobs[i];
       console.log(`[syncCronJobs] Inserting job ${i + 1}/${body.cronJobs.length}: ${job.name}`);
       
+      // Validate payload if provided
+      if (job.payload !== undefined) {
+        const payloadValidation = validatePayload(job.payload);
+        if (!payloadValidation.valid) {
+          console.error(`[syncCronJobs] Job ${job.name} has invalid payload:`, payloadValidation.error);
+          return errorResponse(`Job "${job.name}": ${payloadValidation.error}`, 400);
+        }
+      }
+
+      // Validate model if provided
+      if (job.model !== undefined) {
+        const modelValidation = validateModel(job.model);
+        if (!modelValidation.valid) {
+          console.error(`[syncCronJobs] Job ${job.name} has invalid model:`, modelValidation.error);
+          return errorResponse(`Job "${job.name}": ${modelValidation.error}`, 400);
+        }
+      }
+
+      // Validate thinking if provided
+      if (job.thinking !== undefined) {
+        const thinkingValidation = validateThinking(job.thinking);
+        if (!thinkingValidation.valid) {
+          console.error(`[syncCronJobs] Job ${job.name} has invalid thinking:`, thinkingValidation.error);
+          return errorResponse(`Job "${job.name}": ${thinkingValidation.error}`, 400);
+        }
+      }
+
+      // Validate timeout if provided
+      if (job.timeout_seconds !== undefined) {
+        const timeoutValidation = validateTimeoutSeconds(job.timeout_seconds);
+        if (!timeoutValidation.valid) {
+          console.error(`[syncCronJobs] Job ${job.name} has invalid timeout:`, timeoutValidation.error);
+          return errorResponse(`Job "${job.name}": ${timeoutValidation.error}`, 400);
+        }
+      }
+
+      // Validate deliver if provided
+      if (job.deliver !== undefined) {
+        const deliverValidation = validateDeliver(job.deliver);
+        if (!deliverValidation.valid) {
+          console.error(`[syncCronJobs] Job ${job.name} has invalid deliver:`, deliverValidation.error);
+          return errorResponse(`Job "${job.name}": ${deliverValidation.error}`, 400);
+        }
+      }
+      
       try {
+        const payload = job.payload?.trim() || 'Task instructions not yet configured. Edit this job to add task instructions.';
+        const model = job.model || 'google/gemini-3-flash-preview';
+        const thinking = job.thinking || 'low';
+        const timeoutSeconds = job.timeout_seconds ?? 300;
+        const deliver = job.deliver ?? true;
+
         const result = await env.DB.prepare(
-          `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, last_status) 
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO cron_jobs (name, description, schedule, skill_md_path, skill_md_content, 
+           payload, model, thinking, timeout_seconds, deliver, last_status) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           job.name,
           job.description || null,
           job.schedule,
           job.skill_md_path || null,
           job.skill_md_content || null,
+          payload,
+          model,
+          thinking,
+          timeoutSeconds,
+          deliver ? 1 : 0,
           job.last_status || 'pending'
         ).run();
         console.log(`[syncCronJobs] Job ${job.name} inserted, row ID: ${result.meta?.last_row_id}`);

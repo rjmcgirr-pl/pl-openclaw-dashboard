@@ -28,11 +28,21 @@ CREATE TABLE cron_jobs (
     schedule TEXT NOT NULL,
     skill_md_path TEXT,
     skill_md_content TEXT,
+    
+    -- OpenClaw configuration
+    payload TEXT,
+    model TEXT DEFAULT 'google/gemini-3-flash-preview',
+    thinking TEXT DEFAULT 'low',
+    timeout_seconds INTEGER DEFAULT 300,
+    deliver BOOLEAN DEFAULT 1,
+    
+    -- Execution tracking
     last_run_at DATETIME,
     last_status TEXT DEFAULT 'pending',
     last_output TEXT,
     next_run_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create cron_job_runs table for history

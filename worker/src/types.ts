@@ -40,6 +40,15 @@ export interface UpdateTaskRequest {
 // Cron Job Types
 export type CronJobStatus = 'pending' | 'running' | 'done' | 'error' | 'stalled';
 
+// Valid AI models for cron job execution
+export type CronJobModel = 
+  | 'google/gemini-3-flash-preview'
+  | 'anthropic/claude-opus-4-5'
+  | 'openrouter/auto';
+
+// Thinking levels for agent reasoning
+export type CronJobThinking = 'low' | 'medium' | 'high';
+
 export interface CronJob {
   id: number;
   name: string;
@@ -47,11 +56,21 @@ export interface CronJob {
   schedule: string;
   skill_md_path: string | null;
   skill_md_content: string | null;
+  
+  // OpenClaw configuration
+  payload: string | null;
+  model: CronJobModel;
+  thinking: CronJobThinking;
+  timeout_seconds: number;
+  deliver: number; // SQLite stores BOOLEAN as INTEGER (0 or 1)
+  
+  // Execution tracking
   last_run_at: string | null;
   last_status: CronJobStatus;
   last_output: string | null;
   next_run_at: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface CronJobRun {
@@ -69,6 +88,35 @@ export interface CreateCronJobRequest {
   schedule: string;
   skill_md_path?: string;
   skill_md_content?: string;
+  
+  // OpenClaw configuration
+  payload: string;
+  model?: CronJobModel;
+  thinking?: CronJobThinking;
+  timeout_seconds?: number;
+  deliver?: boolean;
+  
+  // Execution tracking
+  last_status?: CronJobStatus;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+}
+
+export interface UpdateCronJobRequest {
+  name?: string;
+  description?: string;
+  schedule?: string;
+  skill_md_path?: string;
+  skill_md_content?: string;
+  
+  // OpenClaw configuration
+  payload?: string;
+  model?: CronJobModel;
+  thinking?: CronJobThinking;
+  timeout_seconds?: number;
+  deliver?: boolean;
+  
+  // Execution tracking
   last_status?: CronJobStatus;
   last_run_at?: string | null;
   next_run_at?: string | null;
