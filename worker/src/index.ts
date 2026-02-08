@@ -396,7 +396,7 @@ export default {
       // Cron Jobs Routes
       // GET /cron-jobs - List all cron jobs
       if (path === '/cron-jobs' && method === 'GET') {
-        return await listCronJobs(env);
+        return await listCronJobs(env, request);
       }
 
       // POST /cron-jobs - Create a new cron job
@@ -419,7 +419,7 @@ export default {
 
         // GET /cron-jobs/:id - Get single cron job
         if (method === 'GET') {
-          return await getCronJob(env, cronJobId);
+          return await getCronJob(env, cronJobId, request);
         }
 
         // PATCH /cron-jobs/:id - Update cron job
@@ -429,7 +429,7 @@ export default {
 
         // DELETE /cron-jobs/:id - Delete cron job
         if (method === 'DELETE') {
-          return await deleteCronJob(env, cronJobId);
+          return await deleteCronJob(env, cronJobId, request);
         }
       }
 
@@ -437,7 +437,7 @@ export default {
       const cronStartMatch = path.match(/^\/cron-jobs\/(\d+)\/start$/);
       if (cronStartMatch && method === 'POST') {
         const cronJobId = parseInt(cronStartMatch[1], 10);
-        return await startCronJob(env, cronJobId);
+        return await startCronJob(env, cronJobId, request);
       }
 
       // POST /cron-jobs/:id/end - Mark job as done/error with output
@@ -451,7 +451,7 @@ export default {
       const cronRunsMatch = path.match(/^\/cron-jobs\/(\d+)\/runs$/);
       if (cronRunsMatch && method === 'GET') {
         const cronJobId = parseInt(cronRunsMatch[1], 10);
-        return await listCronJobRuns(env, cronJobId);
+        return await listCronJobRuns(env, cronJobId, request);
       }
 
       // POST /cron-jobs/sync - Full sync (delete all, insert new)
@@ -930,30 +930,30 @@ async function deleteTask(env: Env, id: number): Promise<Response> {
 
 // Cron Job Functions
 
-async function listCronJobs(env: Env): Promise<Response> {
+async function listCronJobs(env: Env, request: Request): Promise<Response> {
   try {
     console.log('[listCronJobs] Querying cron_jobs table...');
     const { results } = await env.DB.prepare(
       'SELECT * FROM cron_jobs ORDER BY created_at DESC'
     ).all<CronJob>();
     console.log('[listCronJobs] Results:', results);
-    return jsonResponse({ cronJobs: results || [] });
+    return jsonResponse({ cronJobs: results || [] }, 200, request);
   } catch (error) {
     console.error('[listCronJobs] Error:', error);
-    return errorResponse('Database error: ' + (error as Error).message, 500);
+    return errorResponse('Database error: ' + (error as Error).message, 500, request);
   }
 }
 
-async function getCronJob(env: Env, id: number): Promise<Response> {
+async function getCronJob(env: Env, id: number, request: Request): Promise<Response> {
   const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?')
     .bind(id)
     .first<CronJob>();
   
   if (!cronJob) {
-    return errorResponse('Cron job not found', 404);
+    return errorResponse('Cron job not found', 404, request);
   }
 
-  return jsonResponse({ cronJob });
+  return jsonResponse({ cronJob }, 200, request);
 }
 
 async function createCronJob(env: Env, request: Request): Promise<Response> {
@@ -1217,7 +1217,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
   }
 }
 
-async function deleteCronJob(env: Env, id: number): Promise<Response> {
+async function deleteCronJob(env: Env, id: number, request: Request): Promise<Response> {
   console.log(`[deleteCronJob] Starting delete for cron job ID: ${id}`);
   
   try {
@@ -1225,7 +1225,7 @@ async function deleteCronJob(env: Env, id: number): Promise<Response> {
     const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     if (!existing) {
       console.log(`[deleteCronJob] Cron job ${id} not found`);
-      return errorResponse('Cron job not found', 404);
+      return errorResponse('Cron job not found', 404, request);
     }
     console.log(`[deleteCronJob] Found cron job to delete:`, JSON.stringify(existing));
 
@@ -1238,18 +1238,18 @@ async function deleteCronJob(env: Env, id: number): Promise<Response> {
       await env.DB.prepare('DELETE FROM cron_jobs WHERE id = ?').bind(id).run();
       console.log(`[deleteCronJob] Cron job ${id} deleted successfully`);
       
-      return jsonResponse({ success: true, message: 'Cron job deleted' });
+      return jsonResponse({ success: true, message: 'Cron job deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteCronJob] Database delete failed:', deleteError);
-      return errorResponse('Database delete failed: ' + (deleteError as Error).message, 500);
+      return errorResponse('Database delete failed: ' + (deleteError as Error).message, 500, request);
     }
   } catch (error) {
     console.error('[deleteCronJob] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
-async function startCronJob(env: Env, id: number): Promise<Response> {
+async function startCronJob(env: Env, id: number, request: Request): Promise<Response> {
   console.log(`[startCronJob] Starting cron job ID: ${id}`);
   
   try {
@@ -1257,7 +1257,7 @@ async function startCronJob(env: Env, id: number): Promise<Response> {
     const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     if (!existing) {
       console.log(`[startCronJob] Cron job ${id} not found`);
-      return errorResponse('Cron job not found', 404);
+      return errorResponse('Cron job not found', 404, request);
     }
     console.log(`[startCronJob] Found cron job:`, JSON.stringify(existing));
 
@@ -1283,14 +1283,14 @@ async function startCronJob(env: Env, id: number): Promise<Response> {
       // Fetch the updated cron job
       const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
       console.log('[startCronJob] Cron job started successfully:', JSON.stringify(cronJob));
-      return jsonResponse({ cronJob, message: 'Cron job started' });
+      return jsonResponse({ cronJob, message: 'Cron job started' }, 200, request);
     } catch (dbError) {
       console.error('[startCronJob] Database operation failed:', dbError);
-      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500);
+      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500, request);
     }
   } catch (error) {
     console.error('[startCronJob] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -1360,18 +1360,18 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
   }
 }
 
-async function listCronJobRuns(env: Env, id: number): Promise<Response> {
+async function listCronJobRuns(env: Env, id: number, request: Request): Promise<Response> {
   // Check if cron job exists
   const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
   if (!existing) {
-    return errorResponse('Cron job not found', 404);
+    return errorResponse('Cron job not found', 404, request);
   }
 
   const { results } = await env.DB.prepare(
     'SELECT * FROM cron_job_runs WHERE cron_job_id = ? ORDER BY started_at DESC LIMIT 50'
   ).bind(id).all<CronJobRun>();
 
-  return jsonResponse({ runs: results || [] });
+  return jsonResponse({ runs: results || [] }, 200, request);
 }
 
 async function syncCronJobs(env: Env, request: Request): Promise<Response> {
