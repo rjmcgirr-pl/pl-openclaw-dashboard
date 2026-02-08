@@ -424,21 +424,53 @@ form {
     margin-bottom: 16px;
 }
 
-/* Login Modal Styles */
+/* Login Modal Styles - Professional */
 .login-modal {
-    max-width: 400px;
+    max-width: 420px;
+    text-align: center;
+}
+
+.login-modal .modal-header {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    color: white;
+    padding: 32px 24px;
+    border-radius: 12px 12px 0 0;
+    margin: -24px -24px 24px -24px;
+}
+
+.login-modal .modal-header h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
 }
 
 .login-content {
-    padding: 0 8px;
+    padding: 8px 16px 16px;
+}
+
+.login-logo {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.login-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
 }
 
 .login-description {
     text-align: center;
     color: var(--text-secondary);
-    margin-bottom: 24px;
+    margin-bottom: 28px;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.6;
+    padding: 0 8px;
 }
 
 .login-error {
@@ -453,35 +485,42 @@ form {
     text-align: center;
 }
 
-/* Google Sign In Button */
+/* Google Sign In Button - Professional Style */
 .btn-google {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
-    padding: 12px 24px;
+    padding: 14px 24px;
     background-color: #ffffff;
-    color: #444;
+    color: #3c4043;
     border: 1px solid #dadce0;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 500;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     cursor: pointer;
-    transition: background-color 0.2s, box-shadow 0.2s;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(60,64,67,0.1), 0 1px 3px rgba(60,64,67,0.08);
 }
 
 .btn-google:hover {
     background-color: #f8f9fa;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 6px rgba(60,64,67,0.15), 0 1px 3px rgba(60,64,67,0.12);
+    transform: translateY(-1px);
 }
 
 .btn-google:active {
     background-color: #f1f3f4;
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(60,64,67,0.1);
 }
 
 .btn-google .google-icon {
     flex-shrink: 0;
+    width: 20px;
+    height: 20px;
 }
 
 /* Ensure login modal is always on top */
