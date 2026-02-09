@@ -90,6 +90,22 @@ ELSE:
 
 ---
 
+## Section 4: Environment URLs
+
+### 4.1 Staging Environment
+| Component | URL |
+|-----------|-----|
+| **Frontend** | https://dev.openclaw.propertyllama.com |
+| **API Worker** | https://taskboard-api-staging.rei-workers.workers.dev |
+
+### 4.2 Production Environment
+| Component | URL |
+|-----------|-----|
+| **Frontend** | https://openclaw.propertyllama.com |
+| **API Worker** | https://taskboard-api.rei-workers.workers.dev |
+
+---
+
 ## Section 5: JWT Authentication Test Suite
 
 ### 5.1 Authentication Methods Overview
