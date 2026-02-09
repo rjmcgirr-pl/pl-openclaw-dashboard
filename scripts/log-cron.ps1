@@ -1,8 +1,8 @@
 # log-cron.ps1 - PowerShell helper for logging cron job runs to the taskboard API
 # Usage: . .\scripts\log-cron.ps1
-#        Start-CronJob -Id 1 -Password "your-password"
+#        Start-CronJob -Id 1 -Token $jwtToken
 #        # ... run your cron job ...
-#        Stop-CronJob -Id 1 -Status "done" -Output "Job completed successfully"
+#        Stop-CronJob -Id 1 -Status "done" -Output "Job completed successfully" -Token $jwtToken
 
 param(
     [string]$ConfigPath = "$PSScriptRoot\..\cron-config.json"
@@ -10,13 +10,59 @@ param(
 
 # Default configuration
 $script:DefaultApiUrl = $env:CRON_API_URL
+$script:DefaultToken = $env:CRON_API_TOKEN
+$script:DefaultUsername = $env:CRON_API_USERNAME
 $script:DefaultPassword = $env:CRON_API_PASSWORD
 
 # Load config file if exists
 if (Test-Path $ConfigPath) {
     $config = Get-Content $ConfigPath | ConvertFrom-Json
     if ($config.apiUrl) { $script:DefaultApiUrl = $config.apiUrl }
+    if ($config.token) { $script:DefaultToken = $config.token }
+    if ($config.username) { $script:DefaultUsername = $config.username }
     if ($config.password) { $script:DefaultPassword = $config.password }
+}
+
+<#
+.SYNOPSIS
+    Gets a JWT token for taskboard API authentication.
+.DESCRIPTION
+    Authenticates with the taskboard API and returns a JWT token.
+.PARAMETER ApiUrl
+    The taskboard API URL (optional, uses env/config default).
+.PARAMETER Username
+    The username for authentication.
+.PARAMETER Password
+    The password for authentication.
+.EXAMPLE
+    $token = Get-JwtToken -Username "admin@taskboard.local" -Password "secret123"
+#>
+function Get-JwtToken {
+    param(
+        [string]$ApiUrl = $script:DefaultApiUrl,
+        
+        [string]$Username = $script:DefaultUsername,
+        
+        [string]$Password = $script:DefaultPassword
+    )
+    
+    if (-not $ApiUrl) {
+        throw "API URL not configured. Set CRON_API_URL environment variable or provide -ApiUrl parameter."
+    }
+    
+    if (-not $Username -or -not $Password) {
+        throw "Username and password required. Set CRON_API_USERNAME and CRON_API_PASSWORD environment variables."
+    }
+    
+    $body = @{username=$Username; password=$Password} | ConvertTo-Json
+    $headers = @{'Content-Type'='application/json'}
+    
+    try {
+        $response = Invoke-RestMethod -Uri "$ApiUrl/auth/login" -Method POST -Body $body -Headers $headers
+        return $response.token
+    } catch {
+        throw "Failed to get JWT token: $($_.Exception.Message)"
+    }
 }
 
 <#
@@ -28,14 +74,20 @@ if (Test-Path $ConfigPath) {
     The cron job ID.
 .PARAMETER ApiUrl
     The taskboard API URL (optional, uses env/config default).
+.PARAMETER Token
+    The JWT Bearer token for authentication.
+.PARAMETER Username
+    The username for JWT authentication (alternative to Token).
 .PARAMETER Password
-    The dashboard password (optional, uses env/config default).
+    The password for JWT authentication (alternative to Token).
 .PARAMETER MaxRetries
     Maximum number of retry attempts (default: 3).
 .PARAMETER RetryDelaySec
     Seconds to wait between retries (default: 5).
 .EXAMPLE
-    Start-CronJob -Id 1 -Password "secret123"
+    Start-CronJob -Id 1 -Token $jwtToken
+.EXAMPLE
+    Start-CronJob -Id 1 -Username "admin@taskboard.local" -Password "secret123"
 #>
 function Start-CronJob {
     param(
@@ -43,6 +95,10 @@ function Start-CronJob {
         [int]$Id,
         
         [string]$ApiUrl = $script:DefaultApiUrl,
+        
+        [string]$Token = $script:DefaultToken,
+        
+        [string]$Username = $script:DefaultUsername,
         
         [string]$Password = $script:DefaultPassword,
         
@@ -55,14 +111,19 @@ function Start-CronJob {
         throw "API URL not configured. Set CRON_API_URL environment variable or provide -ApiUrl parameter."
     }
     
-    if (-not $Password) {
-        throw "Password not configured. Set CRON_API_PASSWORD environment variable or provide -Password parameter."
+    # Get token if not provided but credentials are
+    if (-not $Token -and $Username -and $Password) {
+        $Token = Get-JwtToken -ApiUrl $ApiUrl -Username $Username -Password $Password
+    }
+    
+    if (-not $Token) {
+        throw "JWT token required. Set CRON_API_TOKEN environment variable, provide -Token parameter, or provide -Username and -Password for authentication."
     }
     
     $url = "$ApiUrl/cron-jobs/$Id/start"
     $headers = @{
         'Content-Type' = 'application/json'
-        'X-Dashboard-Password' = $Password
+        'Authorization' = "Bearer $Token"
     }
     
     $attempt = 0
@@ -103,16 +164,20 @@ function Start-CronJob {
     Optional output/log message from the job.
 .PARAMETER ApiUrl
     The taskboard API URL (optional, uses env/config default).
+.PARAMETER Token
+    The JWT Bearer token for authentication.
+.PARAMETER Username
+    The username for JWT authentication (alternative to Token).
 .PARAMETER Password
-    The dashboard password (optional, uses env/config default).
+    The password for JWT authentication (alternative to Token).
 .PARAMETER MaxRetries
     Maximum number of retry attempts (default: 3).
 .PARAMETER RetryDelaySec
     Seconds to wait between retries (default: 5).
 .EXAMPLE
-    Stop-CronJob -Id 1 -Status "done" -Output "Backup completed successfully"
+    Stop-CronJob -Id 1 -Status "done" -Output "Backup completed successfully" -Token $jwtToken
 .EXAMPLE
-    Stop-CronJob -Id 1 -Status "error" -Output "Failed to connect to database"
+    Stop-CronJob -Id 1 -Status "error" -Output "Failed to connect to database" -Token $jwtToken
 #>
 function Stop-CronJob {
     param(
@@ -127,6 +192,10 @@ function Stop-CronJob {
         
         [string]$ApiUrl = $script:DefaultApiUrl,
         
+        [string]$Token = $script:DefaultToken,
+        
+        [string]$Username = $script:DefaultUsername,
+        
         [string]$Password = $script:DefaultPassword,
         
         [int]$MaxRetries = 3,
@@ -138,14 +207,19 @@ function Stop-CronJob {
         throw "API URL not configured. Set CRON_API_URL environment variable or provide -ApiUrl parameter."
     }
     
-    if (-not $Password) {
-        throw "Password not configured. Set CRON_API_PASSWORD environment variable or provide -Password parameter."
+    # Get token if not provided but credentials are
+    if (-not $Token -and $Username -and $Password) {
+        $Token = Get-JwtToken -ApiUrl $ApiUrl -Username $Username -Password $Password
+    }
+    
+    if (-not $Token) {
+        throw "JWT token required. Set CRON_API_TOKEN environment variable, provide -Token parameter, or provide -Username and -Password for authentication."
     }
     
     $url = "$ApiUrl/cron-jobs/$Id/end"
     $headers = @{
         'Content-Type' = 'application/json'
-        'X-Dashboard-Password' = $Password
+        'Authorization' = "Bearer $Token"
     }
     
     $body = @{
@@ -191,14 +265,24 @@ function Stop-CronJob {
     Retrieves the list of all cron jobs with their current status.
 .PARAMETER ApiUrl
     The taskboard API URL (optional, uses env/config default).
+.PARAMETER Token
+    The JWT Bearer token for authentication.
+.PARAMETER Username
+    The username for JWT authentication (alternative to Token).
 .PARAMETER Password
-    The dashboard password (optional, uses env/config default).
+    The password for JWT authentication (alternative to Token).
 .EXAMPLE
-    Get-CronJobs -Password "secret123"
+    Get-CronJobs -Token $jwtToken
+.EXAMPLE
+    Get-CronJobs -Username "admin@taskboard.local" -Password "secret123"
 #>
 function Get-CronJobs {
     param(
         [string]$ApiUrl = $script:DefaultApiUrl,
+        
+        [string]$Token = $script:DefaultToken,
+        
+        [string]$Username = $script:DefaultUsername,
         
         [string]$Password = $script:DefaultPassword
     )
@@ -207,13 +291,18 @@ function Get-CronJobs {
         throw "API URL not configured. Set CRON_API_URL environment variable or provide -ApiUrl parameter."
     }
     
-    if (-not $Password) {
-        throw "Password not configured. Set CRON_API_PASSWORD environment variable or provide -Password parameter."
+    # Get token if not provided but credentials are
+    if (-not $Token -and $Username -and $Password) {
+        $Token = Get-JwtToken -ApiUrl $ApiUrl -Username $Username -Password $Password
+    }
+    
+    if (-not $Token) {
+        throw "JWT token required. Set CRON_API_TOKEN environment variable, provide -Token parameter, or provide -Username and -Password for authentication."
     }
     
     $url = "$ApiUrl/cron-jobs"
     $headers = @{
-        'X-Dashboard-Password' = $Password
+        'Authorization' = "Bearer $Token"
     }
     
     try {
@@ -236,10 +325,14 @@ function Get-CronJobs {
     The script block to execute.
 .PARAMETER ApiUrl
     The taskboard API URL (optional).
+.PARAMETER Token
+    The JWT Bearer token for authentication.
+.PARAMETER Username
+    The username for JWT authentication (alternative to Token).
 .PARAMETER Password
-    The dashboard password (optional).
+    The password for JWT authentication (alternative to Token).
 .EXAMPLE
-    Invoke-CronJob -Id 1 -Password "secret123" -ScriptBlock {
+    Invoke-CronJob -Id 1 -Token $jwtToken -ScriptBlock {
         # Your cron job code here
         Get-Process | Export-Csv "processes.csv"
     }
@@ -254,11 +347,15 @@ function Invoke-CronJob {
         
         [string]$ApiUrl = $script:DefaultApiUrl,
         
+        [string]$Token = $script:DefaultToken,
+        
+        [string]$Username = $script:DefaultUsername,
+        
         [string]$Password = $script:DefaultPassword
     )
     
     # Start the cron job
-    Start-CronJob -Id $Id -ApiUrl $ApiUrl -Password $Password
+    Start-CronJob -Id $Id -ApiUrl $ApiUrl -Token $Token -Username $Username -Password $Password
     
     $output = @()
     $success = $false
@@ -283,22 +380,26 @@ function Invoke-CronJob {
     
     # End the cron job
     $status = if ($success) { 'done' } else { 'error' }
-    Stop-CronJob -Id $Id -Status $status -Output $outputString -ApiUrl $ApiUrl -Password $Password
+    Stop-CronJob -Id $Id -Status $status -Output $outputString -ApiUrl $ApiUrl -Token $Token -Username $Username -Password $Password
     
     return $success
 }
 
 # Export functions
-Export-ModuleMember -Function Start-CronJob, Stop-CronJob, Get-CronJobs, Invoke-CronJob
+Export-ModuleMember -Function Get-JwtToken, Start-CronJob, Stop-CronJob, Get-CronJobs, Invoke-CronJob
 
 # If script is dot-sourced, print help
 if ($MyInvocation.InvocationName -eq '.') {
     Write-Host "`n📋 Cron Job Logging Helper Loaded`n" -ForegroundColor Cyan
     Write-Host "Available functions:" -ForegroundColor Yellow
+    Write-Host "  Get-JwtToken    - Get a JWT Bearer token from the API"
     Write-Host "  Start-CronJob   - Mark a cron job as started"
     Write-Host "  Stop-CronJob    - Mark a cron job as done/error"
     Write-Host "  Get-CronJobs    - List all cron jobs"
     Write-Host "  Invoke-CronJob  - Run a script block with auto-logging`n"
-    Write-Host "Configuration:"
-    Write-Host "  Set `$env:CRON_API_URL and `$env:CRON_API_PASSWORD`n"
+    Write-Host "Configuration (environment variables):" -ForegroundColor Yellow
+    Write-Host "  CRON_API_URL      - The taskboard API URL"
+    Write-Host "  CRON_API_TOKEN    - JWT Bearer token (optional)"
+    Write-Host "  CRON_API_USERNAME - Username for JWT auth"
+    Write-Host "  CRON_API_PASSWORD - Password for JWT auth`n"
 }

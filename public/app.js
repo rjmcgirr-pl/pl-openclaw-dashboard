@@ -410,17 +410,24 @@ async function updateTaskStatus(id, status) {
 }
 
 async function deleteTask(id) {
+    console.log('[Delete] deleteTask called with ID:', id);
+    
     if (!confirm('Are you sure you want to delete this task?')) {
+        console.log('[Delete] User cancelled deletion');
         return;
     }
+    
+    console.log('[Delete] User confirmed deletion, calling API...');
     
     try {
         await apiRequest(`/tasks/${id}`, {
             method: 'DELETE',
         });
+        console.log('[Delete] API call successful');
         await loadTasks();
         closeModal();
     } catch (error) {
+        console.error('[Delete] API call failed:', error);
         showError('Failed to delete task: ' + error.message);
     }
 }
@@ -644,10 +651,22 @@ function closeModal() {
 function setupEventListeners() {
     newTaskBtn.addEventListener('click', openNewModal);
     closeModalBtn.addEventListener('click', closeModal);
-    deleteTaskBtn.addEventListener('click', () => {
-        const id = parseInt(taskIdField.value, 10);
-        if (id) deleteTask(id);
-    });
+    
+    // FIX: Use querySelector at event time to ensure element exists
+    // This handles cases where the DOM element reference might be stale
+    const deleteBtn = document.getElementById('deleteTaskBtn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = parseInt(taskIdField.value, 10);
+            console.log('[Delete] Button clicked, task ID:', id);
+            if (id) deleteTask(id);
+        });
+        console.log('[Init] Delete button event listener attached');
+    } else {
+        console.error('[Init] Delete button NOT found in DOM');
+    }
 
     taskModal.addEventListener('click', (e) => {
         if (e.target === taskModal) closeModal();
