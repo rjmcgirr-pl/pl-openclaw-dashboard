@@ -730,13 +730,29 @@ function setupEventListeners() {
         submitCommentBtn.addEventListener('click', submitComment);
     }
 
-    // Comment input - submit on Enter (Shift+Enter for new line)
+    // Comment input - enable/disable submit button based on content
     const commentInput = document.getElementById('commentInput');
+    const commentCharCount = document.getElementById('commentCharCount');
+    if (commentInput && submitCommentBtn) {
+        commentInput.addEventListener('input', () => {
+            const length = commentInput.value.length;
+            submitCommentBtn.disabled = length === 0;
+            if (commentCharCount) {
+                commentCharCount.textContent = length;
+            }
+        });
+        // Initial state
+        submitCommentBtn.disabled = commentInput.value.length === 0;
+    }
+
+    // Comment input - submit on Enter (Shift+Enter for new line)
     if (commentInput) {
         commentInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                submitComment();
+                if (!submitCommentBtn.disabled) {
+                    submitComment();
+                }
             }
         });
     }
@@ -1507,6 +1523,11 @@ function startApp() {
 
 // Comments Functions (state variables already declared at top of file)
 async function loadComments(taskId) {
+    const commentsList = document.getElementById('commentsList');
+    if (commentsList) {
+        commentsList.innerHTML = '<div class="comments-loading">Loading comments...</div>';
+    }
+    
     try {
         const data = await apiRequest(`/tasks/${taskId}/comments`);
         currentComments = data.comments || [];
@@ -1514,6 +1535,9 @@ async function loadComments(taskId) {
         renderComments();
     } catch (error) {
         console.error('Failed to load comments:', error);
+        if (commentsList) {
+            commentsList.innerHTML = '<div class="comments-empty">Failed to load comments. <button onclick="loadComments(' + taskId + ')" style="background:none;border:none;color:var(--accent-primary);cursor:pointer;text-decoration:underline;">Try again</button></div>';
+        }
     }
 }
 
