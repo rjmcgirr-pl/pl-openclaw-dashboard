@@ -28,7 +28,6 @@ id = "a25297fb8b76435ba06747f2e9417c62"
 [vars]
 # Set this to your Cloudflare Pages domain in production
 # ALLOWED_ORIGIN = "https://taskboard.pages.dev"
-# Dashboard password - will be injected by GitHub Actions
 # Google OAuth configuration
 GOOGLE_CLIENT_ID = "placeholder"
 ALLOWED_DOMAIN = "propertyllama.com"
@@ -39,12 +38,12 @@ JWT_SECRET = "set-via-secret"
 
 # For local development
 [env.local]
-vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-dev-password", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
+vars = { ALLOWED_ORIGIN = "http://localhost:8788", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
 
 # Staging environment
 [env.staging]
 name = "taskboard-api-staging"
-vars = { ALLOWED_ORIGIN = "https://dev.openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret", JWT_SECRET = "set-via-secret" }
+vars = { ALLOWED_ORIGIN = "https://dev.openclaw.propertyllama.com", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret", JWT_SECRET = "set-via-secret" }
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -62,7 +61,7 @@ id = "a25297fb8b76435ba06747f2e9417c62"
 # Production environment
 [env.production]
 name = "taskboard-api"
-vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret", JWT_SECRET = "set-via-secret" }
+vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret", JWT_SECRET = "set-via-secret" }
 
 [[env.production.d1_databases]]
 binding = "DB"

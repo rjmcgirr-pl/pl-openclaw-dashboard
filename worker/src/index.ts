@@ -195,15 +195,7 @@ async function validateSession(request: Request, env: Env): Promise<Response | n
     }
   }
   
-  // Check for X-Dashboard-Password header (API token auth)
-  if (env.DASHBOARD_PASSWORD) {
-    const providedPassword = request.headers.get('X-Dashboard-Password');
-    if (providedPassword && providedPassword === env.DASHBOARD_PASSWORD) {
-      return null; // Valid password header
-    }
-  }
-  
-  // Skip validation if no OAuth is configured (fallback to password or allow)
+  // Skip validation if no OAuth is configured
   if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID === 'placeholder') {
     return null; // Allow access if no OAuth configured
   }
@@ -856,15 +848,15 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
 }
 
-// JWT Login handler - exchanges password/API key for JWT tokens
+// JWT Login handler - exchanges API key for JWT tokens (agent authentication)
 async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
   try {
-    const body = await request.json() as { password?: string; api_key?: string };
+    const body = await request.json() as { api_key?: string };
     
-    // Check for API key auth (for service accounts)
+    // Check for API key auth (for service accounts/agents)
     if (body.api_key && env.AGENT_API_KEY) {
       if (body.api_key === env.AGENT_API_KEY) {
-        // Generate a JWT-like token for the agent
+        // Generate a JWT token for the agent
         const token = await generateJwtToken({ 
           type: 'agent', 
           id: 'service-account', 
@@ -881,28 +873,7 @@ async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
       return errorResponse('Invalid API key', 401, request);
     }
     
-    // Check for password auth (dashboard password)
-    if (env.DASHBOARD_PASSWORD && body.password) {
-      if (body.password === env.DASHBOARD_PASSWORD) {
-        // Generate a JWT-like token for the user
-        const token = await generateJwtToken({ 
-          type: 'human', 
-          id: 'dashboard-user', 
-          name: 'Dashboard User',
-          email: 'user@propertyllama.com'
-        }, env);
-        
-        return jsonResponse({ 
-          access_token: token,
-          token_type: 'Bearer',
-          expires_in: 3600,
-          user: { type: 'human', id: 'dashboard-user', name: 'Dashboard User', email: 'user@propertyllama.com' }
-        }, 200, request);
-      }
-      return errorResponse('Invalid password', 401, request);
-    }
-    
-    return errorResponse('Authentication required: provide password or api_key', 401, request);
+    return errorResponse('Authentication required: provide api_key', 401, request);
   } catch (error) {
     console.error('[handleJwtLogin] Error:', error);
     return errorResponse('Login failed', 500, request);

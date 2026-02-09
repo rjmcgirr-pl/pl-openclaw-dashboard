@@ -5,7 +5,6 @@ export interface Env {
   CRON_JOBS_KV: KVNamespace;
   SESSION_KV: KVNamespace;
   ALLOWED_ORIGIN?: string;
-  DASHBOARD_PASSWORD?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   ALLOWED_DOMAIN: string;
