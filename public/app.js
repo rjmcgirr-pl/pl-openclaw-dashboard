@@ -51,6 +51,13 @@ let cronRefreshInterval = null;
 let currentUser = null;
 let currentTab = 'tasks';
 
+// Comments State
+let currentComments = [];
+let currentTaskId = null;
+let replyingToCommentId = null;
+let editingCommentId = null;
+let mentionUsers = []; // Will be populated with users for @mentions
+
 // DOM Elements
 const newTaskBtn = document.getElementById('newTaskBtn');
 const taskModal = document.getElementById('taskModal');
@@ -582,6 +589,17 @@ function openNewModal() {
     taskStatusField.value = 'inbox';
     taskPriorityField.value = '0';
     deleteTaskBtn.style.display = 'none';
+    currentTaskIdForComments = null;
+    currentComments = [];
+
+    // Reset to Details tab
+    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
+    const detailsTab = document.querySelector('.modal-tab[data-tab="details"]');
+    if (detailsTab) detailsTab.classList.add('active');
+    const detailsContent = document.getElementById('detailsTabContent');
+    if (detailsContent) detailsContent.classList.add('active');
+
     taskModal.classList.add('active');
 }
 
@@ -595,11 +613,23 @@ function openEditModal(task) {
     taskBlockedField.checked = task.blocked === 1;
     taskAssignedField.checked = task.assigned_to_agent === 1;
     deleteTaskBtn.style.display = 'block';
+    currentTaskIdForComments = task.id;
+
+    // Reset to Details tab
+    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
+    const detailsTab = document.querySelector('.modal-tab[data-tab="details"]');
+    if (detailsTab) detailsTab.classList.add('active');
+    const detailsContent = document.getElementById('detailsTabContent');
+    if (detailsContent) detailsContent.classList.add('active');
+
     taskModal.classList.add('active');
 }
 
 function closeModal() {
     taskModal.classList.remove('active');
+    currentTaskIdForComments = null;
+    currentComments = [];
 }
 
 // Event Listeners
@@ -658,6 +688,50 @@ function setupEventListeners() {
 
     // Smart polling: listen for tab visibility changes
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Comments tab switching
+    const modalTabs = document.querySelectorAll('.modal-tab');
+    modalTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.tab;
+            if (!tabName) return;
+
+            // Update active tab
+            modalTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Show/hide tab content
+            document.querySelectorAll('.modal-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            const tabContent = document.getElementById(tabName + 'TabContent');
+            if (tabContent) {
+                tabContent.classList.add('active');
+            }
+
+            // Load comments if comments tab is clicked
+            if (tabName === 'comments' && currentTaskIdForComments) {
+                loadComments(currentTaskIdForComments);
+            }
+        });
+    });
+
+    // Comment submit button
+    const submitCommentBtn = document.getElementById('submitCommentBtn');
+    if (submitCommentBtn) {
+        submitCommentBtn.addEventListener('click', submitComment);
+    }
+
+    // Comment input - submit on Enter (Shift+Enter for new line)
+    const commentInput = document.getElementById('commentInput');
+    if (commentInput) {
+        commentInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitComment();
+            }
+        });
+    }
 }
 
 // Smart polling configuration
@@ -1423,11 +1497,76 @@ function startApp() {
     init();
 }
 
+// Comments State
+let currentComments = [];
+let currentTaskIdForComments = null;
+
+// Comments Functions
+async function loadComments(taskId) {
+    try {
+        const data = await apiRequest(`/tasks/${taskId}/comments`);
+        currentComments = data.comments || [];
+        currentTaskIdForComments = taskId;
+        renderComments();
+    } catch (error) {
+        console.error('Failed to load comments:', error);
+    }
+}
+
+function renderComments() {
+    const commentsList = document.getElementById('commentsList');
+    if (!commentsList) return;
+
+    if (currentComments.length === 0) {
+        commentsList.innerHTML = '<div class="comments-empty">No comments yet. Add one below!</div>';
+        return;
+    }
+
+    const html = currentComments.map(comment => {
+        const author = comment.author_name || 'Unknown';
+        const text = escapeHtml(comment.content || '');
+        const time = formatDate(comment.created_at);
+        return `
+            <div class="comment-item">
+                <div class="comment-header">
+                    <span class="comment-author">${escapeHtml(author)}</span>
+                    <span class="comment-time">${time}</span>
+                </div>
+                <div class="comment-text">${text}</div>
+            </div>
+        `;
+    }).join('');
+
+    commentsList.innerHTML = html;
+}
+
+async function submitComment() {
+    const commentInput = document.getElementById('commentInput');
+    if (!commentInput || !currentTaskIdForComments) return;
+
+    const content = commentInput.value.trim();
+    if (!content) return;
+
+    try {
+        await apiRequest(`/tasks/${currentTaskIdForComments}/comments`, {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+        });
+        commentInput.value = '';
+        await loadComments(currentTaskIdForComments);
+    } catch (error) {
+        console.error('Failed to submit comment:', error);
+        showError('Failed to submit comment: ' + error.message);
+    }
+}
+
 // Make functions available globally for inline onclick handlers
 window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
 window.openMarkdownEditor = openMarkdownEditor;
 window.initiateGoogleAuth = initiateGoogleAuth;
+window.loadComments = loadComments;
+window.submitComment = submitComment;
 
 // Start the app when DOM is ready
 if (document.readyState === 'loading') {
