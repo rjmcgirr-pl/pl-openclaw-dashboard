@@ -901,7 +901,9 @@ async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
     return errorResponse('Authentication required: provide api_key or username/password', 401, request);
   } catch (error) {
     console.error('[handleJwtLogin] Error:', error);
-    return errorResponse('Login failed', 500, request);
+    console.error('[handleJwtLogin] Error stack:', (error as Error).stack);
+    console.error('[handleJwtLogin] Env keys:', Object.keys(env).join(', '));
+    return errorResponse('Login failed: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -920,10 +922,15 @@ async function generateJwtToken(payload: object, env: Env): Promise<string> {
   const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const payloadB64 = btoa(JSON.stringify(claims)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   
+  const secret = env.JWT_SECRET || env.SESSION_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET or SESSION_SECRET not configured');
+  }
+  
   const data = encoder.encode(`${headerB64}.${payloadB64}`);
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(env.JWT_SECRET || env.SESSION_SECRET),
+    encoder.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
