@@ -114,7 +114,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: .
-          command: pages deploy public --project-name=taskboard-staging
+          command: pages deploy public --project-name=pl-openclaw-taskboard-staging
 
   # Stage 3: Smoke Test Staging
   smoke-test-staging:

@@ -1,6 +1,7 @@
 // Task Board Frontend
 // Auto-detect API URL based on environment
-const IS_STAGING = window.location.hostname.includes('dev.');
+const IS_STAGING = window.location.hostname.includes('dev.') || 
+                   window.location.hostname.includes('pl-openclaw-taskboard-staging');
 const API_BASE_URL = window.API_BASE_URL || (IS_STAGING 
     ? 'https://taskboard-api-staging.rei-workers.workers.dev'
     : 'https://taskboard-api.rei-workers.workers.dev');
