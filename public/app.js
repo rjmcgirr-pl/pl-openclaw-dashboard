@@ -592,12 +592,16 @@ function openNewModal() {
     currentTaskIdForComments = null;
     currentComments = [];
 
+    // Hide tabs for new task (no comments yet)
+    const tabsContainer = document.getElementById('taskModalTabs');
+    if (tabsContainer) tabsContainer.style.display = 'none';
+
     // Reset to Details tab
-    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-btn').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
-    const detailsTab = document.querySelector('.modal-tab[data-tab="details"]');
+    const detailsTab = document.querySelector('.modal-tab-btn[data-tab="details"]');
     if (detailsTab) detailsTab.classList.add('active');
-    const detailsContent = document.getElementById('detailsTabContent');
+    const detailsContent = document.getElementById('detailsTab');
     if (detailsContent) detailsContent.classList.add('active');
 
     taskModal.classList.add('active');
@@ -615,12 +619,16 @@ function openEditModal(task) {
     deleteTaskBtn.style.display = 'block';
     currentTaskIdForComments = task.id;
 
+    // Show tabs for existing task (has comments)
+    const tabsContainer = document.getElementById('taskModalTabs');
+    if (tabsContainer) tabsContainer.style.display = 'flex';
+
     // Reset to Details tab
-    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-btn').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
-    const detailsTab = document.querySelector('.modal-tab[data-tab="details"]');
+    const detailsTab = document.querySelector('.modal-tab-btn[data-tab="details"]');
     if (detailsTab) detailsTab.classList.add('active');
-    const detailsContent = document.getElementById('detailsTabContent');
+    const detailsContent = document.getElementById('detailsTab');
     if (detailsContent) detailsContent.classList.add('active');
 
     taskModal.classList.add('active');
@@ -690,7 +698,7 @@ function setupEventListeners() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Comments tab switching
-    const modalTabs = document.querySelectorAll('.modal-tab');
+    const modalTabs = document.querySelectorAll('.modal-tab-btn');
     modalTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabName = tab.dataset.tab;
@@ -704,7 +712,7 @@ function setupEventListeners() {
             document.querySelectorAll('.modal-tab-content').forEach(content => {
                 content.classList.remove('active');
             });
-            const tabContent = document.getElementById(tabName + 'TabContent');
+            const tabContent = document.getElementById(tabName + 'Tab');
             if (tabContent) {
                 tabContent.classList.add('active');
             }
