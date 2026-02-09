@@ -1629,51 +1629,642 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
   }
 }
 
+// ============================================================================
+// COMMENT SYSTEM HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Parse @mentions from content
+ * Returns array of mentioned user identifiers (without the @ symbol)
+ */
+function parseMentions(content: string): string[] {
+  const mentionRegex = /@([a-zA-Z0-9._-]+)/g;
+  const mentions: string[] = [];
+  let match;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    mentions.push(match[1]);
+  }
+  return [...new Set(mentions)]; // Remove duplicates
+}
+
+/**
+ * Create notifications for mentions in a comment
+ */
+async function createNotificationsForMentions(
+  env: Env,
+  mentions: string[],
+  taskId: number,
+  commentId: number,
+  excludeUserId: string
+): Promise<void> {
+  for (const mention of mentions) {
+    // Skip if the mentioned user is the comment author
+    if (mention === excludeUserId) continue;
+    
+    try {
+      await env.DB.prepare(
+        `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
+         VALUES (?, 'mention', ?, ?)`
+      ).bind(mention, taskId, commentId).run();
+    } catch (error) {
+      console.error(`[createNotificationsForMentions] Failed to create notification for ${mention}:`, error);
+      // Continue creating other notifications
+    }
+  }
+}
+
+/**
+ * Create a notification for a reply to a comment
+ */
+async function createReplyNotification(
+  env: Env,
+  parentAuthorId: string,
+  taskId: number,
+  commentId: number,
+  replyAuthorId: string
+): Promise<void> {
+  // Don't notify if replying to your own comment
+  if (parentAuthorId === replyAuthorId) return;
+  
+  try {
+    await env.DB.prepare(
+      `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
+       VALUES (?, 'reply', ?, ?)`
+    ).bind(parentAuthorId, taskId, commentId).run();
+  } catch (error) {
+    console.error(`[createReplyNotification] Failed to create reply notification:`, error);
+  }
+}
+
+/**
+ * Create a notification for agent comments
+ */
+async function createAgentCommentNotification(
+  env: Env,
+  taskId: number,
+  commentId: number,
+  taskCreatorId?: string
+): Promise<void> {
+  if (!taskCreatorId) return;
+  
+  try {
+    await env.DB.prepare(
+      `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
+       VALUES (?, 'agent_comment', ?, ?)`
+    ).bind(taskCreatorId, taskId, commentId).run();
+  } catch (error) {
+    console.error(`[createAgentCommentNotification] Failed to create agent comment notification:`, error);
+  }
+}
+
 // Stub implementations for comment and notification handlers (TODO: implement fully)
+
+/**
+ * List comments for a task with nested replies and reactions
+ */
 async function listComments(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ comments: [] });
+  try {
+    // Get all top-level comments (no parent)
+    const topLevelComments = await env.DB.prepare(
+      `SELECT * FROM comments 
+       WHERE task_id = ? AND parent_comment_id IS NULL AND is_deleted = 0
+       ORDER BY created_at ASC`
+    ).bind(taskId).all<Comment>();
+
+    const comments = topLevelComments.results || [];
+
+    // For each comment, get replies and reactions
+    for (const comment of comments) {
+      // Get replies
+      const replies = await env.DB.prepare(
+        `SELECT * FROM comments 
+         WHERE parent_comment_id = ? AND is_deleted = 0
+         ORDER BY created_at ASC`
+      ).bind(comment.id).all<Comment>();
+
+      comment.replies = replies.results || [];
+
+      // Get reactions for the main comment
+      const reactions = await env.DB.prepare(
+        `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
+      ).bind(comment.id).all<CommentReaction>();
+
+      comment.reactions = reactions.results || [];
+
+      // Get reactions for each reply
+      for (const reply of comment.replies) {
+        const replyReactions = await env.DB.prepare(
+          `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
+        ).bind(reply.id).all<CommentReaction>();
+
+        reply.reactions = replyReactions.results || [];
+      }
+    }
+
+    return jsonResponse({ comments });
+  } catch (error) {
+    console.error('[listComments] Error:', error);
+    return errorResponse('Failed to fetch comments', 500);
+  }
 }
 
+/**
+ * Create a new comment on a task
+ */
 async function createComment(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Parse request body
+    const body = await request.json() as CreateCommentRequest;
+    const { content, parent_comment_id } = body;
+
+    // Validate content
+    if (!content || content.trim().length === 0) {
+      return errorResponse('Content is required', 400);
+    }
+    if (content.length > 2000) {
+      return errorResponse('Content must be less than 2000 characters', 400);
+    }
+
+    // Parse mentions
+    const mentions = parseMentions(content);
+    const mentionsJson = mentions.length > 0 ? JSON.stringify(mentions) : null;
+
+    // Insert comment
+    const result = await env.DB.prepare(
+      `INSERT INTO comments 
+       (task_id, parent_comment_id, author_type, author_id, author_name, content, mentions)
+       VALUES (?, ?, 'human', ?, ?, ?, ?)`
+    ).bind(taskId, parent_comment_id || null, user.id, user.name, content, mentionsJson).run();
+
+    const commentId = result.meta?.last_row_id;
+    if (!commentId) {
+      return errorResponse('Failed to create comment', 500);
+    }
+
+    // Create notifications for mentions
+    if (mentions.length > 0) {
+      await createNotificationsForMentions(env, mentions, taskId, commentId, user.id);
+    }
+
+    // If this is a reply, notify the parent comment author
+    if (parent_comment_id) {
+      const parentComment = await env.DB.prepare(
+        'SELECT author_id, author_type FROM comments WHERE id = ?'
+      ).bind(parent_comment_id).first<{ author_id: string; author_type: AuthorType }>();
+
+      if (parentComment && parentComment.author_type === 'human') {
+        await createReplyNotification(env, parentComment.author_id, taskId, commentId, user.id);
+      }
+    }
+
+    // Fetch the created comment
+    const comment = await env.DB.prepare(
+      'SELECT * FROM comments WHERE id = ?'
+    ).bind(commentId).first<Comment>();
+
+    return jsonResponse({ comment }, 201);
+  } catch (error) {
+    console.error('[createComment] Error:', error);
+    return errorResponse('Failed to create comment', 500);
+  }
 }
 
+/**
+ * Create an agent comment on a task (agent API only)
+ */
 async function createAgentComment(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate Agent API Key
+    const agentAuth = validateAgentApiKey(request, env);
+    if (!agentAuth.valid) {
+      return errorResponse('Unauthorized - Invalid API Key', 401);
+    }
+
+    const agentId = agentAuth.agentId || 'agent';
+
+    // Parse request body
+    const body = await request.json() as CreateAgentCommentRequest;
+    const { content, agent_comment_type, mentions, auth_token } = body;
+
+    // Validate content
+    if (!content || content.trim().length === 0) {
+      return errorResponse('Content is required', 400);
+    }
+    if (content.length > 2000) {
+      return errorResponse('Content must be less than 2000 characters', 400);
+    }
+
+    // Parse mentions (from provided list or parse from content)
+    const mentionList = mentions || parseMentions(content);
+    const mentionsJson = mentionList.length > 0 ? JSON.stringify(mentionList) : null;
+
+    // Insert comment with agent_comment_type
+    const commentType = agent_comment_type || 'generic';
+    const result = await env.DB.prepare(
+      `INSERT INTO comments 
+       (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type, mentions)
+       VALUES (?, NULL, 'agent', ?, ?, ?, ?, ?)`
+    ).bind(taskId, agentId, agentId, content, commentType, mentionsJson).run();
+
+    const commentId = result.meta?.last_row_id;
+    if (!commentId) {
+      return errorResponse('Failed to create agent comment', 500);
+    }
+
+    // Create notifications for mentions
+    if (mentionList.length > 0) {
+      await createNotificationsForMentions(env, mentionList, taskId, commentId, agentId);
+    }
+
+    // Notify task creator about agent comment (if we can determine creator)
+    const task = await env.DB.prepare(
+      'SELECT created_by FROM tasks WHERE id = ?'
+    ).bind(taskId).first<{ created_by: string | null }>();
+
+    if (task?.created_by) {
+      await createAgentCommentNotification(env, taskId, commentId, task.created_by);
+    }
+
+    // Fetch the created comment
+    const comment = await env.DB.prepare(
+      'SELECT * FROM comments WHERE id = ?'
+    ).bind(commentId).first<Comment>();
+
+    return jsonResponse({ comment }, 201);
+  } catch (error) {
+    console.error('[createAgentComment] Error:', error);
+    return errorResponse('Failed to create agent comment', 500);
+  }
 }
 
+/**
+ * Claim a task for an agent (update status and create system comment)
+ */
 async function claimTask(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate Agent API Key
+    const agentAuth = validateAgentApiKey(request, env);
+    if (!agentAuth.valid) {
+      return errorResponse('Unauthorized - Invalid API Key', 401);
+    }
+
+    const agentId = agentAuth.agentId || 'agent';
+
+    // Parse request body
+    const body = await request.json() as ClaimTaskRequest;
+    const { agent_id, auth_token } = body;
+
+    // Update task to claimed status
+    await env.DB.prepare(
+      `UPDATE tasks SET 
+       status = 'in_progress', 
+       assigned_to_agent = 1,
+       updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(taskId).run();
+
+    // Create a system comment indicating the task was claimed
+    const claimMessage = `🔒 Task claimed by ${agent_id || agentId}`;
+    const result = await env.DB.prepare(
+      `INSERT INTO comments 
+       (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
+       VALUES (?, NULL, 'system', 'system', 'System', ?, 'status_update')`
+    ).bind(taskId, claimMessage).run();
+
+    const commentId = result.meta?.last_row_id;
+
+    // Notify task creator
+    const task = await env.DB.prepare(
+      'SELECT created_by FROM tasks WHERE id = ?'
+    ).bind(taskId).first<{ created_by: string | null }>();
+
+    if (task?.created_by) {
+      await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
+    }
+
+    return jsonResponse({ 
+      message: 'Task claimed successfully', 
+      agent_id: agent_id || agentId,
+      comment_id: commentId
+    });
+  } catch (error) {
+    console.error('[claimTask] Error:', error);
+    return errorResponse('Failed to claim task', 500);
+  }
 }
 
 async function releaseTask(env: Env, taskId: number, request: Request): Promise<Response> {
   return jsonResponse({ message: 'Not implemented' }, 501);
 }
 
+/**
+ * Update an existing comment (edit)
+ */
 async function updateComment(env: Env, commentId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Get the comment to check ownership
+    const comment = await env.DB.prepare(
+      'SELECT author_id, author_type FROM comments WHERE id = ? AND is_deleted = 0'
+    ).bind(commentId).first<{ author_id: string; author_type: AuthorType }>();
+
+    if (!comment) {
+      return errorResponse('Comment not found', 404);
+    }
+
+    // Only allow editing own comments
+    if (comment.author_id !== user.id) {
+      return errorResponse('Cannot edit comments from other users', 403);
+    }
+
+    // Parse request body
+    const body = await request.json() as CreateCommentRequest;
+    const { content } = body;
+
+    // Validate content
+    if (!content || content.trim().length === 0) {
+      return errorResponse('Content is required', 400);
+    }
+    if (content.length > 2000) {
+      return errorResponse('Content must be less than 2000 characters', 400);
+    }
+
+    // Parse new mentions
+    const mentions = parseMentions(content);
+    const mentionsJson = mentions.length > 0 ? JSON.stringify(mentions) : null;
+
+    // Update comment
+    await env.DB.prepare(
+      `UPDATE comments SET 
+       content = ?,
+       mentions = ?,
+       is_edited = 1,
+       updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(content, mentionsJson, commentId).run();
+
+    // Create notifications for new mentions (if any new ones were added)
+    if (mentions.length > 0 && user.type === 'human') {
+      await createNotificationsForMentions(env, mentions, 0, commentId, user.id);
+    }
+
+    // Fetch the updated comment
+    const updatedComment = await env.DB.prepare(
+      'SELECT * FROM comments WHERE id = ?'
+    ).bind(commentId).first<Comment>();
+
+    return jsonResponse({ comment: updatedComment });
+  } catch (error) {
+    console.error('[updateComment] Error:', error);
+    return errorResponse('Failed to update comment', 500);
+  }
 }
 
+/**
+ * Soft delete a comment
+ */
 async function deleteComment(env: Env, commentId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Get the comment to check ownership
+    const comment = await env.DB.prepare(
+      'SELECT author_id, author_type FROM comments WHERE id = ? AND is_deleted = 0'
+    ).bind(commentId).first<{ author_id: string; author_type: AuthorType }>();
+
+    if (!comment) {
+      return errorResponse('Comment not found', 404);
+    }
+
+    // Only allow deleting own comments
+    if (comment.author_id !== user.id) {
+      return errorResponse('Cannot delete comments from other users', 403);
+    }
+
+    // Soft delete (set is_deleted flag)
+    await env.DB.prepare(
+      `UPDATE comments SET 
+       is_deleted = 1,
+       updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(commentId).run();
+
+    return jsonResponse({ message: 'Comment deleted successfully' });
+  } catch (error) {
+    console.error('[deleteComment] Error:', error);
+    return errorResponse('Failed to delete comment', 500);
+  }
 }
 
+/**
+ * Add a reaction to a comment
+ */
 async function addReaction(env: Env, commentId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Verify comment exists
+    const comment = await env.DB.prepare(
+      'SELECT id FROM comments WHERE id = ? AND is_deleted = 0'
+    ).bind(commentId).first<{ id: number }>();
+
+    if (!comment) {
+      return errorResponse('Comment not found', 404);
+    }
+
+    // Parse request body
+    const body = await request.json() as AddReactionRequest;
+    const { emoji } = body;
+
+    if (!emoji || emoji.trim().length === 0) {
+      return errorResponse('Emoji is required', 400);
+    }
+
+    // Insert reaction (UNIQUE constraint handles duplicates)
+    try {
+      await env.DB.prepare(
+        `INSERT INTO comment_reactions (comment_id, emoji, author_id, author_type)
+         VALUES (?, ?, ?, ?)`
+      ).bind(commentId, emoji, user.id, user.type).run();
+    } catch (error) {
+      // Likely a duplicate, which is fine
+      console.log('[addReaction] Duplicate reaction ignored');
+    }
+
+    // Fetch all reactions for this comment
+    const reactions = await env.DB.prepare(
+      `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
+    ).bind(commentId).all<CommentReaction>();
+
+    return jsonResponse({ reactions: reactions.results || [] });
+  } catch (error) {
+    console.error('[addReaction] Error:', error);
+    return errorResponse('Failed to add reaction', 500);
+  }
 }
 
+/**
+ * Remove a reaction from a comment
+ */
 async function removeReaction(env: Env, commentId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Parse request body to get emoji
+    const body = await request.json() as AddReactionRequest;
+    const { emoji } = body;
+
+    if (!emoji) {
+      return errorResponse('Emoji is required', 400);
+    }
+
+    // Delete the reaction
+    await env.DB.prepare(
+      `DELETE FROM comment_reactions 
+       WHERE comment_id = ? AND emoji = ? AND author_id = ?`
+    ).bind(commentId, emoji, user.id).run();
+
+    // Fetch remaining reactions for this comment
+    const reactions = await env.DB.prepare(
+      `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
+    ).bind(commentId).all<CommentReaction>();
+
+    return jsonResponse({ reactions: reactions.results || [] });
+  } catch (error) {
+    console.error('[removeReaction] Error:', error);
+    return errorResponse('Failed to remove reaction', 500);
+  }
 }
 
+/**
+ * List notifications for the current user
+ */
 async function listNotifications(env: Env, request: Request): Promise<Response> {
-  return jsonResponse({ notifications: [] });
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Only humans can have notifications
+    if (user.type !== 'human') {
+      return jsonResponse({ notifications: [] });
+    }
+
+    // Get URL params for filtering (optional)
+    const url = new URL(request.url);
+    const unreadOnly = url.searchParams.get('unread') === 'true';
+
+    // Build query
+    let query = `
+      SELECT 
+        n.*,
+        t.name as task_title,
+        substr(c.content, 1, 100) as comment_preview
+      FROM comment_notifications n
+      LEFT JOIN tasks t ON n.task_id = t.id
+      LEFT JOIN comments c ON n.comment_id = c.id
+      WHERE n.user_id = ?
+    `;
+    
+    if (unreadOnly) {
+      query += ` AND n.is_read = 0`;
+    }
+    
+    query += ` ORDER BY n.created_at DESC LIMIT 50`;
+
+    const notifications = await env.DB.prepare(query).bind(user.id).all<CommentNotification & { task_title: string; comment_preview: string }>();
+
+    return jsonResponse({ 
+      notifications: notifications.results || [],
+      unread_count: notifications.results?.filter(n => n.is_read === 0).length || 0
+    });
+  } catch (error) {
+    console.error('[listNotifications] Error:', error);
+    return errorResponse('Failed to fetch notifications', 500);
+  }
 }
 
+/**
+ * Mark a single notification as read
+ */
 async function markNotificationRead(env: Env, notificationId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Update the notification
+    await env.DB.prepare(
+      `UPDATE comment_notifications SET 
+       is_read = 1,
+       read_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`
+    ).bind(notificationId, user.id).run();
+
+    return jsonResponse({ message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('[markNotificationRead] Error:', error);
+    return errorResponse('Failed to mark notification as read', 500);
+  }
 }
 
+/**
+ * Mark all notifications as read for the current user
+ */
 async function markAllNotificationsRead(env: Env, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  try {
+    // Validate user auth
+    const user = await getCurrentUser(request, env);
+    if (!user) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // Only humans can have notifications
+    if (user.type !== 'human') {
+      return jsonResponse({ message: 'No notifications to mark' });
+    }
+
+    // Update all unread notifications for this user
+    const result = await env.DB.prepare(
+      `UPDATE comment_notifications SET 
+       is_read = 1,
+       read_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND is_read = 0`
+    ).bind(user.id).run();
+
+    return jsonResponse({ 
+      message: 'All notifications marked as read',
+      marked_count: result.meta?.changes || 0
+    });
+  } catch (error) {
+    console.error('[markAllNotificationsRead] Error:', error);
+    return errorResponse('Failed to mark notifications as read', 500);
+  }
 }
