@@ -785,6 +785,12 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleGetMe(request: Request, env: Env): Promise<Response> {
+  // Check for agent auth or session
+  const agentAuth = validateAgentApiKey(request, env);
+  if (agentAuth.valid && agentAuth.agentId) {
+    return jsonResponse({ user: { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentId } }, 200, request);
+  }
+  
   const session = await getSession(request, env);
   
   if (!session) {
@@ -794,7 +800,7 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  return jsonResponse({ user: session }, 200, request);
+  return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
 }
 
 async function listTasks(env: Env, searchParams: URLSearchParams, request: Request): Promise<Response> {
