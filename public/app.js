@@ -1497,11 +1497,7 @@ function startApp() {
     init();
 }
 
-// Comments State
-let currentComments = [];
-let currentTaskIdForComments = null;
-
-// Comments Functions
+// Comments Functions (state variables already declared at top of file)
 async function loadComments(taskId) {
     try {
         const data = await apiRequest(`/tasks/${taskId}/comments`);
