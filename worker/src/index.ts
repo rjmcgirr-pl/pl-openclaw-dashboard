@@ -1622,3 +1622,52 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
     return errorResponse('Internal server error: ' + (error as Error).message, 500);
   }
 }
+
+// Stub implementations for comment and notification handlers (TODO: implement fully)
+async function listComments(env: Env, taskId: number, request: Request): Promise<Response> {
+  return jsonResponse({ comments: [] });
+}
+
+async function createComment(env: Env, taskId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function createAgentComment(env: Env, taskId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function claimTask(env: Env, taskId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function releaseTask(env: Env, taskId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function updateComment(env: Env, commentId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function deleteComment(env: Env, commentId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function addReaction(env: Env, commentId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function removeReaction(env: Env, commentId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function listNotifications(env: Env, request: Request): Promise<Response> {
+  return jsonResponse({ notifications: [] });
+}
+
+async function markNotificationRead(env: Env, notificationId: number, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
+
+async function markAllNotificationsRead(env: Env, request: Request): Promise<Response> {
+  return jsonResponse({ message: 'Not implemented' }, 501);
+}
