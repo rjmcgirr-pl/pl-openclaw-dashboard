@@ -652,20 +652,23 @@ function setupEventListeners() {
     newTaskBtn.addEventListener('click', openNewModal);
     closeModalBtn.addEventListener('click', closeModal);
     
-    // FIX: Use querySelector at event time to ensure element exists
-    // This handles cases where the DOM element reference might be stale
-    const deleteBtn = document.getElementById('deleteTaskBtn');
-    if (deleteBtn) {
-        deleteBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const id = parseInt(taskIdField.value, 10);
-            console.log('[Delete] Button clicked, task ID:', id);
-            if (id) deleteTask(id);
+    // Use event delegation for delete button - more robust against DOM changes
+    // The delete button is inside the task modal, so we listen on the modal
+    if (taskModal) {
+        taskModal.addEventListener('click', (e) => {
+            // Check if the clicked element is the delete button or inside it
+            const deleteBtn = e.target.closest('#deleteTaskBtn');
+            if (deleteBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = parseInt(taskIdField.value, 10);
+                console.log('[Delete] Button clicked via delegation, task ID:', id);
+                if (id) deleteTask(id);
+            }
         });
-        console.log('[Init] Delete button event listener attached');
+        console.log('[Init] Delete button event delegation attached to modal');
     } else {
-        console.error('[Init] Delete button NOT found in DOM');
+        console.error('[Init] Task modal NOT found in DOM');
     }
 
     taskModal.addEventListener('click', (e) => {
