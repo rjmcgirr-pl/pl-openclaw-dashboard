@@ -9,6 +9,7 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   ALLOWED_DOMAIN: string;
   SESSION_SECRET: string;
+  JWT_SECRET: string; // For JWT token signing/verification
   AGENT_API_KEY: string; // For agent automation without OAuth
 }
 

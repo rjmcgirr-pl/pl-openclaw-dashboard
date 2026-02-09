@@ -226,7 +226,7 @@ async function verifyJwtToken(token: string, env: Env): Promise<object | null> {
     
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(env.SESSION_SECRET),
+      encoder.encode(env.JWT_SECRET || env.SESSION_SECRET),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['verify']
@@ -898,7 +898,7 @@ async function generateJwtToken(payload: object, env: Env): Promise<string> {
   const data = encoder.encode(`${headerB64}.${payloadB64}`);
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(env.SESSION_SECRET),
+    encoder.encode(env.JWT_SECRET || env.SESSION_SECRET),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
