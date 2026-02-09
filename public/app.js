@@ -74,14 +74,6 @@ async function init() {
     debugLog('Environment: ' + (IS_STAGING ? 'STAGING' : 'PRODUCTION'));
     debugLog('API URL: ' + API_BASE_URL);
     
-    // Hide staging-only elements on production
-    if (!IS_STAGING) {
-        document.querySelectorAll('.staging-only').forEach(el => {
-            el.style.display = 'none';
-        });
-        debugLog('Hidden staging-only elements (production mode)');
-    }
-    
     // ALWAYS set up event listeners first (including OAuth handlers)
     debugLog('Setting up event listeners...');
     setupEventListeners();
@@ -158,13 +150,6 @@ let oauthPopup = null;
 
 function initiateGoogleAuth() {
     debugLog('=== GOOGLE AUTH CLICKED ===');
-    
-    // Only allow Google OAuth popup on staging
-    if (!IS_STAGING) {
-        debugLog('ERROR: Google OAuth popup is only available on staging');
-        showLoginError('Google OAuth is disabled on production. Please use the dashboard password.');
-        return;
-    }
     
     // Clear any previous error
     const errorDiv = document.getElementById('loginError');
