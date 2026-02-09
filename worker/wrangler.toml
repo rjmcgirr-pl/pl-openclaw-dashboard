@@ -42,7 +42,7 @@ vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-d
 # Staging environment
 [env.staging]
 name = "taskboard-api-staging"
-vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
+vars = { ALLOWED_ORIGIN = "https://dev.openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
 
 [[env.staging.d1_databases]]
 binding = "DB"
