@@ -1926,7 +1926,7 @@ async function listComments(env: Env, taskId: number, request: Request): Promise
     return jsonResponse({ comments });
   } catch (error) {
     console.error('[listComments] Error:', error);
-    return errorResponse('Failed to fetch comments', 500);
+    return errorResponse('Failed to fetch comments', 500, request);
   }
 }
 
@@ -1938,7 +1938,7 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Parse request body
@@ -1947,10 +1947,10 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
 
     // Validate content
     if (!content || content.trim().length === 0) {
-      return errorResponse('Content is required', 400);
+      return errorResponse('Content is required', 400, request);
     }
     if (content.length > 2000) {
-      return errorResponse('Content must be less than 2000 characters', 400);
+      return errorResponse('Content must be less than 2000 characters', 400, request);
     }
 
     // Parse mentions
@@ -1966,7 +1966,7 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
 
     const commentId = result.meta?.last_row_id;
     if (!commentId) {
-      return errorResponse('Failed to create comment', 500);
+      return errorResponse('Failed to create comment', 500, request);
     }
 
     // Create notifications for mentions
@@ -1993,7 +1993,7 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
     return jsonResponse({ comment }, 201);
   } catch (error) {
     console.error('[createComment] Error:', error);
-    return errorResponse('Failed to create comment', 500);
+    return errorResponse('Failed to create comment', 500, request);
   }
 }
 
@@ -2005,7 +2005,7 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
     // Validate Agent API Key
     const agentAuth = validateAgentApiKey(request, env);
     if (!agentAuth.valid) {
-      return errorResponse('Unauthorized - Invalid API Key', 401);
+      return errorResponse('Unauthorized - Invalid API Key', 401, request);
     }
 
     const agentId = agentAuth.agentId || 'agent';
@@ -2016,10 +2016,10 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
 
     // Validate content
     if (!content || content.trim().length === 0) {
-      return errorResponse('Content is required', 400);
+      return errorResponse('Content is required', 400, request);
     }
     if (content.length > 2000) {
-      return errorResponse('Content must be less than 2000 characters', 400);
+      return errorResponse('Content must be less than 2000 characters', 400, request);
     }
 
     // Parse mentions (from provided list or parse from content)
@@ -2036,7 +2036,7 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
 
     const commentId = result.meta?.last_row_id;
     if (!commentId) {
-      return errorResponse('Failed to create agent comment', 500);
+      return errorResponse('Failed to create agent comment', 500, request);
     }
 
     // Create notifications for mentions
@@ -2061,7 +2061,7 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
     return jsonResponse({ comment }, 201);
   } catch (error) {
     console.error('[createAgentComment] Error:', error);
-    return errorResponse('Failed to create agent comment', 500);
+    return errorResponse('Failed to create agent comment', 500, request);
   }
 }
 
@@ -2073,7 +2073,7 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     // Validate Agent API Key
     const agentAuth = validateAgentApiKey(request, env);
     if (!agentAuth.valid) {
-      return errorResponse('Unauthorized - Invalid API Key', 401);
+      return errorResponse('Unauthorized - Invalid API Key', 401, request);
     }
 
     const agentId = agentAuth.agentId || 'agent';
@@ -2133,7 +2133,7 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Get the comment to check ownership
@@ -2142,12 +2142,12 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
     ).bind(commentId).first<{ author_id: string; author_type: AuthorType }>();
 
     if (!comment) {
-      return errorResponse('Comment not found', 404);
+      return errorResponse('Comment not found', 404, request);
     }
 
     // Only allow editing own comments
     if (comment.author_id !== user.id) {
-      return errorResponse('Cannot edit comments from other users', 403);
+      return errorResponse('Cannot edit comments from other users', 403, request);
     }
 
     // Parse request body
@@ -2156,10 +2156,10 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
 
     // Validate content
     if (!content || content.trim().length === 0) {
-      return errorResponse('Content is required', 400);
+      return errorResponse('Content is required', 400, request);
     }
     if (content.length > 2000) {
-      return errorResponse('Content must be less than 2000 characters', 400);
+      return errorResponse('Content must be less than 2000 characters', 400, request);
     }
 
     // Parse new mentions
@@ -2189,7 +2189,7 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
     return jsonResponse({ comment: updatedComment });
   } catch (error) {
     console.error('[updateComment] Error:', error);
-    return errorResponse('Failed to update comment', 500);
+    return errorResponse('Failed to update comment', 500, request);
   }
 }
 
@@ -2201,7 +2201,7 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Get the comment to check ownership
@@ -2210,12 +2210,12 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
     ).bind(commentId).first<{ author_id: string; author_type: AuthorType }>();
 
     if (!comment) {
-      return errorResponse('Comment not found', 404);
+      return errorResponse('Comment not found', 404, request);
     }
 
     // Only allow deleting own comments
     if (comment.author_id !== user.id) {
-      return errorResponse('Cannot delete comments from other users', 403);
+      return errorResponse('Cannot delete comments from other users', 403, request);
     }
 
     // Soft delete (set is_deleted flag)
@@ -2229,7 +2229,7 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
     return jsonResponse({ message: 'Comment deleted successfully' });
   } catch (error) {
     console.error('[deleteComment] Error:', error);
-    return errorResponse('Failed to delete comment', 500);
+    return errorResponse('Failed to delete comment', 500, request);
   }
 }
 
@@ -2241,7 +2241,7 @@ async function addReaction(env: Env, commentId: number, request: Request): Promi
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Verify comment exists
@@ -2250,7 +2250,7 @@ async function addReaction(env: Env, commentId: number, request: Request): Promi
     ).bind(commentId).first<{ id: number }>();
 
     if (!comment) {
-      return errorResponse('Comment not found', 404);
+      return errorResponse('Comment not found', 404, request);
     }
 
     // Parse request body
@@ -2258,7 +2258,7 @@ async function addReaction(env: Env, commentId: number, request: Request): Promi
     const { emoji } = body;
 
     if (!emoji || emoji.trim().length === 0) {
-      return errorResponse('Emoji is required', 400);
+      return errorResponse('Emoji is required', 400, request);
     }
 
     // Insert reaction (UNIQUE constraint handles duplicates)
@@ -2280,7 +2280,7 @@ async function addReaction(env: Env, commentId: number, request: Request): Promi
     return jsonResponse({ reactions: reactions.results || [] });
   } catch (error) {
     console.error('[addReaction] Error:', error);
-    return errorResponse('Failed to add reaction', 500);
+    return errorResponse('Failed to add reaction', 500, request);
   }
 }
 
@@ -2292,7 +2292,7 @@ async function removeReaction(env: Env, commentId: number, request: Request): Pr
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Parse request body to get emoji
@@ -2300,7 +2300,7 @@ async function removeReaction(env: Env, commentId: number, request: Request): Pr
     const { emoji } = body;
 
     if (!emoji) {
-      return errorResponse('Emoji is required', 400);
+      return errorResponse('Emoji is required', 400, request);
     }
 
     // Delete the reaction
@@ -2317,7 +2317,7 @@ async function removeReaction(env: Env, commentId: number, request: Request): Pr
     return jsonResponse({ reactions: reactions.results || [] });
   } catch (error) {
     console.error('[removeReaction] Error:', error);
-    return errorResponse('Failed to remove reaction', 500);
+    return errorResponse('Failed to remove reaction', 500, request);
   }
 }
 
