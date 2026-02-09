@@ -46,8 +46,8 @@ vars = { ALLOWED_ORIGIN = "*", DASHBOARD_PASSWORD = "your-password-here", GOOGLE
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "openclaw-taskboard-db"
-database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
+database_name = "openclaw-taskboard-db-staging"
+database_id = "7114d7e5-d638-49ad-a643-f606676be6d2"
 
 [[env.staging.kv_namespaces]]
 binding = "CRON_JOBS_KV"
