@@ -74,6 +74,13 @@ async function init() {
     debugLog('Environment: ' + (IS_STAGING ? 'STAGING' : 'PRODUCTION'));
     debugLog('API URL: ' + API_BASE_URL);
     
+    // Hide staging-only elements on production
+    if (!IS_STAGING) {
+        document.querySelectorAll('.staging-only').forEach(el => {
+            el.style.display = 'none';
+        });
+    }
+    
     // ALWAYS set up event listeners first (including OAuth handlers)
     debugLog('Setting up event listeners...');
     setupEventListeners();
