@@ -830,22 +830,42 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleGetMe(request: Request, env: Env): Promise<Response> {
-  // Check for agent auth or session
+  // Check for agent auth first
   const agentAuth = validateAgentApiKey(request, env);
   if (agentAuth.valid && agentAuth.agentId) {
     return jsonResponse({ user: { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentId } }, 200, request);
   }
   
-  const session = await getSession(request, env);
-  
-  if (!session) {
-    return new Response(JSON.stringify({ error: 'Not authenticated' }), {
-      status: 401,
-      headers: getCorsHeaders(request),
-    });
+  // Check for JWT Bearer token
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const payload = await verifyJwtToken(token, env);
+    if (payload) {
+      // JWT token is valid - extract user info from payload
+      const jwtUser = payload as { type: string; id: string; email?: string; name?: string };
+      return jsonResponse({ 
+        user: { 
+          type: jwtUser.type,
+          id: jwtUser.id,
+          email: jwtUser.email || jwtUser.id,
+          name: jwtUser.name || jwtUser.id
+        } 
+      }, 200, request);
+    }
   }
-
-  return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
+  
+  // Check for session cookie (OAuth)
+  const session = await getSession(request, env);
+  if (session) {
+    return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
+  }
+  
+  // No valid authentication found
+  return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+    status: 401,
+    headers: getCorsHeaders(request),
+  });
 }
 
 // JWT Login handler - exchanges API key or credentials for JWT tokens
