@@ -421,7 +421,7 @@ export default {
         if (method === 'DELETE') {
           console.log(`[route] DELETE /tasks/${taskId} - entering deleteTask`);
           try {
-            const result = await deleteTask(env, taskId);
+            const result = await deleteTask(env, taskId, request);
             console.log(`[route] DELETE /tasks/${taskId} - deleteTask completed`);
             return result;
           } catch (err) {
@@ -931,7 +931,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     const existing = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<Task>();
     if (!existing) {
       console.log(`[updateTask] Task ${id} not found`);
-      return errorResponse('Task not found', 404);
+      return errorResponse('Task not found', 404, request);
     }
     console.log(`[updateTask] Found existing task:`, JSON.stringify(existing));
 
@@ -941,7 +941,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
       console.log('[updateTask] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[updateTask] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400, request);
     }
 
     const updates: string[] = [];
@@ -951,7 +951,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     if (body.name !== undefined) {
       if (body.name.trim() === '') {
         console.log('[updateTask] Validation failed: name cannot be empty');
-        return errorResponse('Task name cannot be empty', 400);
+        return errorResponse('Task name cannot be empty', 400, request);
       }
       updates.push('name = ?');
       values.push(body.name.trim());
@@ -966,7 +966,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
       const validStatuses = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
       if (!validStatuses.includes(body.status)) {
         console.log(`[updateTask] Validation failed: invalid status "${body.status}"`);
-        return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+        return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400, request);
       }
       updates.push('status = ?');
       values.push(body.status);
@@ -992,7 +992,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
 
   if (updates.length === 1) {
     console.log('[updateTask] No fields to update');
-    return errorResponse('No fields to update', 400);
+    return errorResponse('No fields to update', 400, request);
   }
 
   values.push(id);
@@ -1005,7 +1005,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     console.log('[updateTask] Update successful');
   } catch (updateError) {
     console.error('[updateTask] Database update failed:', updateError);
-    return errorResponse('Database update failed: ' + (updateError as Error).message, 500);
+    return errorResponse('Database update failed: ' + (updateError as Error).message, 500, request);
   }
 
   // Fetch the updated task
@@ -1015,18 +1015,18 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     console.log('[updateTask] Fetched updated task:', JSON.stringify(task));
   } catch (fetchError) {
     console.error('[updateTask] Failed to fetch updated task:', fetchError);
-    return errorResponse('Updated task but failed to fetch it: ' + (fetchError as Error).message, 500);
+    return errorResponse('Updated task but failed to fetch it: ' + (fetchError as Error).message, 500, request);
   }
 
   console.log('[updateTask] Successfully updated task:', id);
-  return jsonResponse({ task });
+  return jsonResponse({ task }, 200, request);
   } catch (error) {
     console.error('[updateTask] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
-async function deleteTask(env: Env, id: number): Promise<Response> {
+async function deleteTask(env: Env, id: number, request: Request): Promise<Response> {
   console.log(`[deleteTask] Starting delete for task ID: ${id}`);
   
   try {
@@ -1034,21 +1034,21 @@ async function deleteTask(env: Env, id: number): Promise<Response> {
     const existing = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<Task>();
     if (!existing) {
       console.log(`[deleteTask] Task ${id} not found`);
-      return errorResponse('Task not found', 404);
+      return errorResponse('Task not found', 404, request);
     }
     console.log(`[deleteTask] Found task to delete:`, JSON.stringify(existing));
 
     try {
       await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
       console.log(`[deleteTask] Task ${id} deleted successfully`);
-      return jsonResponse({ success: true, message: 'Task deleted' });
+      return jsonResponse({ success: true, message: 'Task deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteTask] Database delete failed:', deleteError);
-      return errorResponse('Database delete failed: ' + (deleteError as Error).message, 500);
+      return errorResponse('Database delete failed: ' + (deleteError as Error).message, 500, request);
     }
   } catch (error) {
     console.error('[deleteTask] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
