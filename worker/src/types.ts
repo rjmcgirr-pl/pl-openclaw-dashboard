@@ -11,6 +11,7 @@ export interface Env {
   SESSION_SECRET: string;
   JWT_SECRET: string; // For JWT token signing/verification
   AGENT_API_KEY: string; // For agent automation without OAuth
+  ADMIN_PASSWORD?: string; // For admin user JWT login
 }
 
 // OAuth Types

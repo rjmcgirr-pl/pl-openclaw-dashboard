@@ -848,10 +848,10 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
 }
 
-// JWT Login handler - exchanges API key for JWT tokens (agent authentication)
+// JWT Login handler - exchanges API key or credentials for JWT tokens
 async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
   try {
-    const body = await request.json() as { api_key?: string };
+    const body = await request.json() as { api_key?: string; username?: string; password?: string };
     
     // Check for API key auth (for service accounts/agents)
     if (body.api_key && env.AGENT_API_KEY) {
@@ -873,7 +873,32 @@ async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
       return errorResponse('Invalid API key', 401, request);
     }
     
-    return errorResponse('Authentication required: provide api_key', 401, request);
+    // Check for username/password auth (for admin user)
+    if (body.username && body.password) {
+      // For now, support admin@taskboard.local with a configured password
+      // In production, this should query the database for user credentials
+      const adminEmail = 'admin@taskboard.local';
+      const adminPassword = env.ADMIN_PASSWORD || 'admin123'; // Default for testing
+      
+      if (body.username === adminEmail && body.password === adminPassword) {
+        const token = await generateJwtToken({ 
+          type: 'user', 
+          id: 'admin', 
+          email: adminEmail,
+          name: 'Admin User' 
+        }, env);
+        
+        return jsonResponse({ 
+          access_token: token,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: { type: 'user', id: 'admin', email: adminEmail, name: 'Admin User' }
+        }, 200, request);
+      }
+      return errorResponse('Invalid username or password', 401, request);
+    }
+    
+    return errorResponse('Authentication required: provide api_key or username/password', 401, request);
   } catch (error) {
     console.error('[handleJwtLogin] Error:', error);
     return errorResponse('Login failed', 500, request);
