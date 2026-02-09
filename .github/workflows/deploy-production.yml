@@ -79,7 +79,7 @@ jobs:
               .replace(/<your-session-kv-namespace-id>/g, '${{ secrets.AUTH_SESSION_KV_NAMESPACE_ID }}')
               .replace(/GOOGLE_CLIENT_ID = \"placeholder\"/g, 'GOOGLE_CLIENT_ID = \"' + googleClientId + '\"')
               .replace(/ALLOWED_DOMAIN = \"propertyllama.com\"/g, 'ALLOWED_DOMAIN = \"' + allowedDomain + '\"')
-              .replace(/# AGENT_API_KEY = \"set-via-secret\"/g, 'AGENT_API_KEY = \"' + agentApiKey + '\"');
+              .replace(/AGENT_API_KEY = \"set-via-secret\"/g, 'AGENT_API_KEY = \"' + agentApiKey + '\"');
             fs.writeFileSync('wrangler.toml', updated);
           "
 

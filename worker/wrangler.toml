@@ -42,7 +42,7 @@ vars = { ALLOWED_ORIGIN = "http://localhost:8788", DASHBOARD_PASSWORD = "local-d
 # Staging environment
 [env.staging]
 name = "taskboard-api-staging"
-vars = { ALLOWED_ORIGIN = "https://dev.openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
+vars = { ALLOWED_ORIGIN = "https://dev.openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret" }
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -60,7 +60,7 @@ id = "a25297fb8b76435ba06747f2e9417c62"
 # Production environment
 [env.production]
 name = "taskboard-api"
-vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
+vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", DASHBOARD_PASSWORD = "your-password-here", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret" }
 
 [[env.production.d1_databases]]
 binding = "DB"
