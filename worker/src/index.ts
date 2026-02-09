@@ -185,19 +185,27 @@ async function validateSession(request: Request, env: Env): Promise<Response | n
     return null; // Allow access for agents
   }
   
+  // Check for JWT Bearer token
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const payload = await verifyJwtToken(token, env);
+    if (payload) {
+      return null; // Valid JWT token
+    }
+  }
+  
+  // Check for X-Dashboard-Password header (API token auth)
+  if (env.DASHBOARD_PASSWORD) {
+    const providedPassword = request.headers.get('X-Dashboard-Password');
+    if (providedPassword && providedPassword === env.DASHBOARD_PASSWORD) {
+      return null; // Valid password header
+    }
+  }
+  
   // Skip validation if no OAuth is configured (fallback to password or allow)
   if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID === 'placeholder') {
-    // Fall back to password validation if configured
-    if (env.DASHBOARD_PASSWORD) {
-      const providedPassword = request.headers.get('X-Dashboard-Password');
-      if (!providedPassword || providedPassword !== env.DASHBOARD_PASSWORD) {
-        return new Response(JSON.stringify({ error: 'Invalid password' }), {
-          status: 401,
-          headers: getCorsHeaders(request),
-        });
-      }
-    }
-    return null; // Allow access if no auth configured
+    return null; // Allow access if no OAuth configured
   }
 
   const session = await getSession(request, env);
@@ -209,6 +217,46 @@ async function validateSession(request: Request, env: Env): Promise<Response | n
   }
 
   return null; // Validation passed
+}
+
+// Verify JWT token
+async function verifyJwtToken(token: string, env: Env): Promise<object | null> {
+  try {
+    const [headerB64, payloadB64, signatureB64] = token.split('.');
+    if (!headerB64 || !payloadB64 || !signatureB64) return null;
+    
+    const encoder = new TextEncoder();
+    const data = encoder.encode(`${headerB64}.${payloadB64}`);
+    
+    // Reconstruct signature from base64url
+    const sigB64 = signatureB64.replace(/-/g, '+').replace(/_/g, '/');
+    const signature = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0));
+    
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(env.SESSION_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    
+    const valid = await crypto.subtle.verify('HMAC', key, signature, data);
+    if (!valid) return null;
+    
+    // Decode payload
+    const payloadJson = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
+    const payload = JSON.parse(payloadJson);
+    
+    // Check expiration
+    if (payload.exp && Date.now() / 1000 > payload.exp) {
+      return null; // Token expired
+    }
+    
+    return payload;
+  } catch (error) {
+    console.error('[verifyJwtToken] Error:', error);
+    return null;
+  }
 }
 
 function jsonResponse(data: unknown, status = 200, request?: Request, customHeaders?: Record<string, string>): Response {
@@ -368,6 +416,11 @@ export default {
       // GET /auth/me - Get current user
       if (path === '/auth/me' && method === 'GET') {
         return await handleGetMe(request, env);
+      }
+
+      // POST /auth/login - JWT login (public route, no session validation)
+      if (path === '/auth/login' && method === 'POST') {
+        return await handleJwtLogin(request, env);
       }
 
       // Validate session for all other routes
@@ -801,6 +854,92 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   }
 
   return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
+}
+
+// JWT Login handler - exchanges password/API key for JWT tokens
+async function handleJwtLogin(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.json() as { password?: string; api_key?: string };
+    
+    // Check for API key auth (for service accounts)
+    if (body.api_key && env.AGENT_API_KEY) {
+      if (body.api_key === env.AGENT_API_KEY) {
+        // Generate a JWT-like token for the agent
+        const token = await generateJwtToken({ 
+          type: 'agent', 
+          id: 'service-account', 
+          name: 'Service Account' 
+        }, env);
+        
+        return jsonResponse({ 
+          access_token: token,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: { type: 'agent', id: 'service-account', name: 'Service Account' }
+        }, 200, request);
+      }
+      return errorResponse('Invalid API key', 401, request);
+    }
+    
+    // Check for password auth (dashboard password)
+    if (env.DASHBOARD_PASSWORD && body.password) {
+      if (body.password === env.DASHBOARD_PASSWORD) {
+        // Generate a JWT-like token for the user
+        const token = await generateJwtToken({ 
+          type: 'human', 
+          id: 'dashboard-user', 
+          name: 'Dashboard User',
+          email: 'user@propertyllama.com'
+        }, env);
+        
+        return jsonResponse({ 
+          access_token: token,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user: { type: 'human', id: 'dashboard-user', name: 'Dashboard User', email: 'user@propertyllama.com' }
+        }, 200, request);
+      }
+      return errorResponse('Invalid password', 401, request);
+    }
+    
+    return errorResponse('Authentication required: provide password or api_key', 401, request);
+  } catch (error) {
+    console.error('[handleJwtLogin] Error:', error);
+    return errorResponse('Login failed', 500, request);
+  }
+}
+
+// Generate a simple JWT-like token (base64-encoded signed payload)
+async function generateJwtToken(payload: object, env: Env): Promise<string> {
+  const encoder = new TextEncoder();
+  const header = { alg: 'HS256', typ: 'JWT' };
+  
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    ...payload,
+    iat: now,
+    exp: now + 3600, // 1 hour expiration
+  };
+  
+  const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const payloadB64 = btoa(JSON.stringify(claims)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  
+  const data = encoder.encode(`${headerB64}.${payloadB64}`);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(env.SESSION_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  
+  const signature = await crypto.subtle.sign('HMAC', key, data);
+  const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
 }
 
 async function listTasks(env: Env, searchParams: URLSearchParams, request: Request): Promise<Response> {

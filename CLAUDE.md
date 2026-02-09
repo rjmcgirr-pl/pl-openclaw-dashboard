@@ -127,8 +127,15 @@ The Worker compares this to `env.DASHBOARD_PASSWORD`.
 
 ## Testing
 
-No automated tests yet. Manual test checklist:
+### Comprehensive QA Test Plan
+See `docs/QA_TEST_PLAN.md` for the complete testing strategy including:
+- 42+ functional tests (task management, comments, cron monitor, drag-drop)
+- 25+ UI/UX tests (responsive, modals, navigation, loading, errors)
+- 35+ API and security tests (auth, authorization, XSS, CSRF)
+- Pre-deployment and post-deployment checklists
+- Bug report templates and sign-off criteria
 
+### Quick Manual Test Checklist
 - [ ] Login with password
 - [ ] Create task
 - [ ] Move task between columns
