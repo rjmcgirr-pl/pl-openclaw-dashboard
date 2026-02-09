@@ -110,7 +110,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: .
-          command: pages deploy public --project-name=taskboard
+          command: pages deploy public --project-name=pl-openclaw-taskboard
 
       - name: Output Deployed URLs
         run: |
