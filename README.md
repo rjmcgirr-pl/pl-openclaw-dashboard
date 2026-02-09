@@ -1,8 +1,10 @@
 # ⚡ PL OpenClaw Dashboard
 
-A secure, full-stack task management board built with Cloudflare Workers, D1 (SQLite), and Pages. Features a kanban-style interface with drag-and-drop support and password protection.
+A secure, full-stack task management board built with Cloudflare Workers, D1 (SQLite), and Pages. Features a kanban-style interface with drag-and-drop support and multiple authentication methods.
 
 **Live URL:** https://openclaw.propertyllama.com
+
+**Authentication:** Google OAuth, API Token, JWT
 
 ![Dashboard Preview](https://openclaw.propertyllama.com/preview.png)
 
