@@ -1,7 +1,9 @@
 // Task Board Frontend
-// Configure this to point to your Worker API
-// Production API URL - change this if your Worker is on a different domain
-const API_BASE_URL = window.API_BASE_URL || 'https://taskboard-api.rei-workers.workers.dev';
+// Auto-detect API URL based on environment
+const IS_STAGING = window.location.hostname.includes('dev.');
+const API_BASE_URL = window.API_BASE_URL || (IS_STAGING 
+    ? 'https://taskboard-api-staging.rei-workers.workers.dev'
+    : 'https://taskboard-api.rei-workers.workers.dev');
 const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || '';
 
 // Debug logging - visible on page
@@ -68,6 +70,7 @@ const taskAssignedField = document.getElementById('taskAssigned');
 // Initialize
 async function init() {
     debugLog('=== INIT START ===');
+    debugLog('Environment: ' + (IS_STAGING ? 'STAGING' : 'PRODUCTION'));
     debugLog('API URL: ' + API_BASE_URL);
     
     // ALWAYS set up event listeners first (including OAuth handlers)
