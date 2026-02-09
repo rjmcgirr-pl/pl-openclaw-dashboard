@@ -105,56 +105,132 @@
 
     <!-- New/Edit Task Modal -->
     <div id="taskModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content task-modal-content">
             <div class="modal-header">
                 <h2 id="modalTitle">New Task</h2>
                 <button class="close-btn" id="closeModal">&times;</button>
             </div>
-            <form id="taskForm">
-                <input type="hidden" id="taskId">
-                <div class="form-group">
-                    <label for="taskName">Name *</label>
-                    <input type="text" id="taskName" required placeholder="Enter task name">
-                </div>
-                <div class="form-group">
-                    <label for="taskDescription">Description</label>
-                    <textarea id="taskDescription" rows="3" placeholder="Enter task description"></textarea>
-                </div>
-                <div class="form-row">
+            
+            <!-- Task Modal Tabs -->
+            <div class="modal-tabs" id="taskModalTabs" style="display: none;">
+                <button class="modal-tab-btn active" data-tab="details">📋 Details</button>
+                <button class="modal-tab-btn" data-tab="comments">
+                    💬 Comments
+                    <span class="tab-badge" id="commentsTabBadge">0</span>
+                </button>
+            </div>
+            
+            <!-- Details Tab -->
+            <div id="detailsTab" class="modal-tab-content active">
+                <form id="taskForm">
+                    <input type="hidden" id="taskId">
                     <div class="form-group">
-                        <label for="taskStatus">Status</label>
-                        <select id="taskStatus">
-                            <option value="inbox">📥 Inbox</option>
-                            <option value="up_next">⬆️ Up Next</option>
-                            <option value="in_progress">🔨 In Progress</option>
-                            <option value="in_review">👀 In Review</option>
-                            <option value="done">✅ Done</option>
-                        </select>
+                        <label for="taskName">Name *</label>
+                        <input type="text" id="taskName" required placeholder="Enter task name">
                     </div>
                     <div class="form-group">
-                        <label for="taskPriority">Priority</label>
-                        <input type="number" id="taskPriority" min="0" max="10" value="0" placeholder="0-10">
+                        <label for="taskDescription">Description</label>
+                        <textarea id="taskDescription" rows="3" placeholder="Enter task description"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="taskStatus">Status</label>
+                            <select id="taskStatus">
+                                <option value="inbox">📥 Inbox</option>
+                                <option value="up_next">⬆️ Up Next</option>
+                                <option value="in_progress">🔨 In Progress</option>
+                                <option value="in_review">👀 In Review</option>
+                                <option value="done">✅ Done</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="taskPriority">Priority</label>
+                            <input type="number" id="taskPriority" min="0" max="10" value="0" placeholder="0-10">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="taskBlocked">
+                                <span>🚫 Blocked</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="taskAssigned">
+                                <span>🤖 Assign to Agent</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="deleteTaskBtn" class="btn-danger" style="display: none;">Delete</button>
+                        <button type="submit" class="btn-primary">Save Task</button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Comments Tab -->
+            <div id="commentsTab" class="modal-tab-content">
+                <div class="comments-container">
+                    <!-- Comments List -->
+                    <div class="comments-list" id="commentsList">
+                        <div class="comments-loading">Loading comments...</div>
+                    </div>
+                    
+                    <!-- New Comment Input -->
+                    <div class="comment-input-container" id="commentInputContainer">
+                        <div class="comment-input-wrapper">
+                            <textarea 
+                                id="commentInput" 
+                                class="comment-input" 
+                                rows="3" 
+                                placeholder="Add a comment... Use @ to mention"
+                                maxlength="2000"
+                            ></textarea>
+                            
+                            <!-- @Mention Autocomplete Dropdown -->
+                            <div class="mention-dropdown" id="mentionDropdown" style="display: none;">
+                                <div class="mention-dropdown-header">Mention someone</div>
+                                <div class="mention-dropdown-list" id="mentionDropdownList"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="comment-input-actions">
+                            <div class="comment-char-counter">
+                                <span id="commentCharCount">0</span> / 2000
+                            </div>
+                            <button type="button" id="submitCommentBtn" class="btn-primary" disabled>
+                                Comment
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Reply Input (hidden by default, shown when replying) -->
+                    <div class="reply-input-container" id="replyInputContainer" style="display: none;">
+                        <div class="reply-header">
+                            <span>Replying to <strong id="replyToAuthor">@user</strong></span>
+                            <button type="button" class="reply-cancel" id="cancelReplyBtn">&times;</button>
+                        </div>
+                        <div class="comment-input-wrapper">
+                            <textarea 
+                                id="replyInput" 
+                                class="comment-input" 
+                                rows="2" 
+                                placeholder="Write a reply..."
+                                maxlength="2000"
+                            ></textarea>
+                        </div>
+                        <div class="comment-input-actions">
+                            <div class="comment-char-counter">
+                                <span id="replyCharCount">0</span> / 2000
+                            </div>
+                            <button type="button" id="submitReplyBtn" class="btn-primary" disabled>
+                                Reply
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group checkbox-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="taskBlocked">
-                            <span>🚫 Blocked</span>
-                        </label>
-                    </div>
-                    <div class="form-group checkbox-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="taskAssigned">
-                            <span>🤖 Assign to Agent</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" id="deleteTaskBtn" class="btn-danger" style="display: none;">Delete</button>
-                    <button type="submit" class="btn-primary">Save Task</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 
