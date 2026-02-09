@@ -625,6 +625,13 @@ function openEditModal(task) {
     taskAssignedField.checked = task.assigned_to_agent === 1;
     deleteTaskBtn.style.display = 'block';
     currentTaskIdForComments = task.id;
+    
+    // Attach delete handler directly to button (ensures it works)
+    deleteTaskBtn.onclick = () => {
+        const id = parseInt(taskIdField.value, 10);
+        console.log('[Delete] Button clicked, task ID:', id);
+        if (id) deleteTask(id);
+    };
 
     // Show tabs for existing task (has comments)
     const tabsContainer = document.getElementById('taskModalTabs');
