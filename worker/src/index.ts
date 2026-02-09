@@ -1923,7 +1923,7 @@ async function listComments(env: Env, taskId: number, request: Request): Promise
       }
     }
 
-    return jsonResponse({ comments });
+    return jsonResponse({ comments }, 200, request);
   } catch (error) {
     console.error('[listComments] Error:', error);
     return errorResponse('Failed to fetch comments', 500, request);
@@ -1990,7 +1990,7 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
-    return jsonResponse({ comment }, 201);
+    return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createComment] Error:', error);
     return errorResponse('Failed to create comment', 500, request);
@@ -2058,7 +2058,7 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
-    return jsonResponse({ comment }, 201);
+    return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createAgentComment] Error:', error);
     return errorResponse('Failed to create agent comment', 500, request);
@@ -2114,15 +2114,15 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
       message: 'Task claimed successfully', 
       agent_id: agent_id || agentId,
       comment_id: commentId
-    });
+    }, 200, request);
   } catch (error) {
     console.error('[claimTask] Error:', error);
-    return errorResponse('Failed to claim task', 500);
+    return errorResponse('Failed to claim task', 500, request);
   }
 }
 
 async function releaseTask(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501);
+  return jsonResponse({ message: 'Not implemented' }, 501, request);
 }
 
 /**
@@ -2186,7 +2186,7 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
-    return jsonResponse({ comment: updatedComment });
+    return jsonResponse({ comment: updatedComment }, 200, request);
   } catch (error) {
     console.error('[updateComment] Error:', error);
     return errorResponse('Failed to update comment', 500, request);
@@ -2226,7 +2226,7 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
        WHERE id = ?`
     ).bind(commentId).run();
 
-    return jsonResponse({ message: 'Comment deleted successfully' });
+    return jsonResponse({ message: 'Comment deleted successfully' }, 200, request);
   } catch (error) {
     console.error('[deleteComment] Error:', error);
     return errorResponse('Failed to delete comment', 500, request);
@@ -2277,7 +2277,7 @@ async function addReaction(env: Env, commentId: number, request: Request): Promi
       `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
     ).bind(commentId).all<CommentReaction>();
 
-    return jsonResponse({ reactions: reactions.results || [] });
+    return jsonResponse({ reactions: reactions.results || [] }, 200, request);
   } catch (error) {
     console.error('[addReaction] Error:', error);
     return errorResponse('Failed to add reaction', 500, request);
@@ -2314,7 +2314,7 @@ async function removeReaction(env: Env, commentId: number, request: Request): Pr
       `SELECT * FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC`
     ).bind(commentId).all<CommentReaction>();
 
-    return jsonResponse({ reactions: reactions.results || [] });
+    return jsonResponse({ reactions: reactions.results || [] }, 200, request);
   } catch (error) {
     console.error('[removeReaction] Error:', error);
     return errorResponse('Failed to remove reaction', 500, request);
