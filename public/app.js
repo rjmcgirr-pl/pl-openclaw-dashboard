@@ -502,6 +502,7 @@ function createTaskCard(task) {
         <div class="task-header">
             <span class="task-name">${escapeHtml(task.name)}</span>
             <div class="task-badges">${badges.join('')}</div>
+            <button class="task-delete-btn" title="Delete task">🗑️</button>
         </div>
         ${description}
         <div class="task-meta">Updated: ${formatDate(task.updated_at)}</div>
@@ -512,7 +513,7 @@ function createTaskCard(task) {
 
     // Click to edit
     card.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('task-btn')) {
+        if (!e.target.classList.contains('task-btn') && !e.target.classList.contains('task-delete-btn')) {
             openEditModal(task);
         }
     });
@@ -525,6 +526,15 @@ function createTaskCard(task) {
             updateTaskStatus(task.id, newStatus);
         });
     });
+
+    // Delete button
+    const deleteBtn = card.querySelector('.task-delete-btn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteTask(task.id);
+        });
+    }
 
     // Drag events
     card.addEventListener('dragstart', handleDragStart);
