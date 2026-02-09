@@ -108,6 +108,14 @@ jobs:
           workingDirectory: ./worker
           command: d1 execute openclaw-taskboard-db --file=../schema.sql
 
+      - name: Deploy Pages to Staging
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: .
+          command: pages deploy public --project-name=taskboard-staging
+
   # Stage 3: Smoke Test Staging
   smoke-test-staging:
     name: Smoke Test Staging
