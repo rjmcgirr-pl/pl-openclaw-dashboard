@@ -32,6 +32,8 @@ id = "a25297fb8b76435ba06747f2e9417c62"
 # Google OAuth configuration
 GOOGLE_CLIENT_ID = "placeholder"
 ALLOWED_DOMAIN = "propertyllama.com"
+# Agent API Key for automation (set via wrangler secret)
+# AGENT_API_KEY = "set-via-secret"
 
 # For local development
 [env.local]

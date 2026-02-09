@@ -1,4 +1,4 @@
-import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session } from './types';
+import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType } from './types';
 
 // Dynamic CORS headers - origin must match the requesting site for credentials to work
 function getCorsHeaders(request: Request): Record<string, string> {
@@ -145,8 +145,46 @@ function validateEmailDomain(email: string, allowedDomain: string): boolean {
   return email.toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`);
 }
 
+// Agent API Key validation helper
+function validateAgentApiKey(request: Request, env: Env): { valid: boolean; agentId?: string } {
+  const apiKey = request.headers.get('X-Agent-API-Key');
+  if (!apiKey || !env.AGENT_API_KEY) {
+    return { valid: false };
+  }
+  
+  // Simple API key validation - in production could check KV for multiple keys
+  if (apiKey === env.AGENT_API_KEY) {
+    return { valid: true, agentId: 'clawdbot' };
+  }
+  
+  return { valid: false };
+}
+
+// Get current user identity (from session or agent API key)
+async function getCurrentUser(request: Request, env: Env): Promise<{ type: 'human' | 'agent'; id: string; name: string } | null> {
+  // Check for agent auth first
+  const agentAuth = validateAgentApiKey(request, env);
+  if (agentAuth.valid && agentAuth.agentId) {
+    return { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentId };
+  }
+  
+  // Check for session
+  const session = await getSession(request, env);
+  if (session) {
+    return { type: 'human', id: session.email, name: session.name };
+  }
+  
+  return null;
+}
+
 // Session validation helper
 async function validateSession(request: Request, env: Env): Promise<Response | null> {
+  // First check for Agent API Key (for automation)
+  const agentAuth = validateAgentApiKey(request, env);
+  if (agentAuth.valid) {
+    return null; // Allow access for agents
+  }
+  
   // Skip validation if no OAuth is configured (fallback to password or allow)
   if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID === 'placeholder') {
     // Fall back to password validation if configured
@@ -391,6 +429,86 @@ export default {
             throw err;
           }
         }
+      }
+
+      // Task Comment Routes
+      // GET /tasks/:id/comments - List comments for a task
+      const taskCommentsMatch = path.match(/^\/tasks\/(\d+)\/comments$/);
+      if (taskCommentsMatch && method === 'GET') {
+        const taskId = parseInt(taskCommentsMatch[1], 10);
+        return await listComments(env, taskId, request);
+      }
+
+      // POST /tasks/:id/comments - Create comment on a task
+      if (taskCommentsMatch && method === 'POST') {
+        const taskId = parseInt(taskCommentsMatch[1], 10);
+        return await createComment(env, taskId, request);
+      }
+
+      // POST /tasks/:id/agent-comment - Agent creates comment
+      const taskAgentCommentMatch = path.match(/^\/tasks\/(\d+)\/agent-comment$/);
+      if (taskAgentCommentMatch && method === 'POST') {
+        const taskId = parseInt(taskAgentCommentMatch[1], 10);
+        return await createAgentComment(env, taskId, request);
+      }
+
+      // POST /tasks/:id/claim - Agent claims task
+      const taskClaimMatch = path.match(/^\/tasks\/(\d+)\/claim$/);
+      if (taskClaimMatch && method === 'POST') {
+        const taskId = parseInt(taskClaimMatch[1], 10);
+        return await claimTask(env, taskId, request);
+      }
+
+      // POST /tasks/:id/release - Agent releases task claim
+      const taskReleaseMatch = path.match(/^\/tasks\/(\d+)\/release$/);
+      if (taskReleaseMatch && method === 'POST') {
+        const taskId = parseInt(taskReleaseMatch[1], 10);
+        return await releaseTask(env, taskId, request);
+      }
+
+      // Comment routes (not task-specific)
+      // PATCH /comments/:id - Edit comment
+      const commentMatch = path.match(/^\/comments\/(\d+)$/);
+      if (commentMatch && method === 'PATCH') {
+        const commentId = parseInt(commentMatch[1], 10);
+        return await updateComment(env, commentId, request);
+      }
+
+      // DELETE /comments/:id - Soft delete comment
+      if (commentMatch && method === 'DELETE') {
+        const commentId = parseInt(commentMatch[1], 10);
+        return await deleteComment(env, commentId, request);
+      }
+
+      // POST /comments/:id/reactions - Add reaction
+      const commentReactionMatch = path.match(/^\/comments\/(\d+)\/reactions$/);
+      if (commentReactionMatch && method === 'POST') {
+        const commentId = parseInt(commentReactionMatch[1], 10);
+        return await addReaction(env, commentId, request);
+      }
+
+      // DELETE /comments/:id/reactions - Remove reaction
+      if (commentReactionMatch && method === 'DELETE') {
+        const commentId = parseInt(commentReactionMatch[1], 10);
+        return await removeReaction(env, commentId, request);
+      }
+
+      // Notification routes
+      // GET /notifications - List unread notifications
+      if (path === '/notifications' && method === 'GET') {
+        return await listNotifications(env, request);
+      }
+
+      // POST /notifications/:id/read - Mark notification as read
+      const notificationMatch = path.match(/^\/notifications\/(\d+)\/read$/);
+      if (notificationMatch && method === 'POST') {
+        const notificationId = parseInt(notificationMatch[1], 10);
+        return await markNotificationRead(env, notificationId, request);
+      }
+
+      // POST /notifications/read-all - Mark all notifications as read
+      if (path === '/notifications/read-all' && method === 'POST') {
+        return await markAllNotificationsRead(env, request);
       }
 
       // Cron Jobs Routes

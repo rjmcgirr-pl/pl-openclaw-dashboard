@@ -10,6 +10,7 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   ALLOWED_DOMAIN: string;
   SESSION_SECRET: string;
+  AGENT_API_KEY: string; // For agent automation without OAuth
 }
 
 // OAuth Types
@@ -158,4 +159,69 @@ export interface UpdateCronJobRequest {
 export interface EndCronJobRequest {
   status: 'done' | 'error';
   output?: string;
+}
+
+// Comment Types
+export type AuthorType = 'human' | 'agent' | 'system';
+export type AgentCommentType = 'status_update' | 'question' | 'completion' | 'generic';
+export type NotificationType = 'mention' | 'reply' | 'agent_comment';
+
+export interface Comment {
+  id: number;
+  task_id: number;
+  parent_comment_id: number | null;
+  author_type: AuthorType;
+  author_id: string;
+  author_name: string;
+  content: string;
+  agent_comment_type: AgentCommentType | null;
+  mentions: string[] | null;
+  is_edited: number;
+  is_deleted: number;
+  created_at: string;
+  updated_at: string;
+  replies?: Comment[];
+  reactions?: CommentReaction[];
+}
+
+export interface CommentReaction {
+  id: number;
+  comment_id: number;
+  emoji: string;
+  author_id: string;
+  author_type: AuthorType;
+  created_at: string;
+}
+
+export interface CommentNotification {
+  id: number;
+  user_id: string;
+  type: NotificationType;
+  task_id: number;
+  comment_id: number;
+  is_read: number;
+  created_at: string;
+  task_title?: string;
+  comment_preview?: string;
+}
+
+export interface CreateCommentRequest {
+  content: string;
+  parent_comment_id?: number | null;
+}
+
+export interface CreateAgentCommentRequest {
+  content: string;
+  agent_comment_type?: AgentCommentType;
+  mentions?: string[];
+  auth_token: string;
+}
+
+export interface AddReactionRequest {
+  emoji: string;
+}
+
+export interface ClaimTaskRequest {
+  agent_id: string;
+  auth_token: string;
 }
