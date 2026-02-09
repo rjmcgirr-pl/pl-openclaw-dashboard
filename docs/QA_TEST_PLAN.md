@@ -90,6 +90,260 @@ ELSE:
 
 ---
 
+## Section 5: JWT Authentication Test Suite
+
+### 5.1 Authentication Methods Overview
+
+The taskboard supports three authentication methods:
+1. **Google OAuth** — For human users (browser-based)
+2. **JWT Bearer Token** — For API/automation access (primary)
+3. **API Key** (X-Agent-API-Key) — For agent automation (fallback)
+
+### 5.2 JWT Authentication Test Cases
+
+#### Test 5.2.1: Public Route Accessibility
+**Purpose:** Verify public auth routes are accessible without authentication
+
+| Endpoint | Method | Expected Status | Expected Response |
+|----------|--------|-----------------|-------------------|
+| `/auth/google` | GET | 302 | Redirect to Google OAuth |
+| `/auth/google/callback` | GET | 400/401 | Missing params (not 500) |
+| `/auth/login` | POST | 401 | Invalid credentials error |
+| `/auth/refresh` | POST | 401 | Invalid refresh token |
+
+**Test Steps:**
+1. Call each endpoint without any auth headers
+2. Verify response status codes match expected
+3. Verify protected routes return 401 (not 500)
+
+**Pass Criteria:**
+- [ ] `/auth/google` returns 302 redirect
+- [ ] `/auth/login` returns 401 (not "Authentication required" error)
+- [ ] No "catch-22" where login requires pre-authentication
+
+---
+
+#### Test 5.2.2: JWT Login Flow
+**Purpose:** Verify JWT token generation and validation
+
+**Test Steps:**
+1. POST to `/auth/login` with valid credentials:
+   ```json
+   {
+     "username": "admin@taskboard.local",
+     "password": "[VALID_PASSWORD]"
+   }
+   ```
+2. Verify response contains:
+   - `token` (JWT access token)
+   - `refreshToken` (refresh token)
+   - `user` object with user details
+3. Verify token format (Base64 JWT with 3 parts)
+4. Decode token and verify claims:
+   - `sub` (user ID)
+   - `email`
+   - `role`
+   - `exp` (expiration ~24h)
+   - `iat` (issued at)
+
+**Pass Criteria:**
+- [ ] Login returns 200 with valid tokens
+- [ ] Token structure is valid JWT
+- [ ] Token contains correct user claims
+- [ ] Token expires in ~24 hours
+
+---
+
+#### Test 5.2.3: Protected Route Access with JWT
+**Purpose:** Verify JWT tokens grant access to protected routes
+
+**Test Steps:**
+1. Obtain valid JWT token from `/auth/login`
+2. Call protected endpoints with header:
+   ```
+   Authorization: Bearer <jwt_token>
+   ```
+3. Test endpoints:
+   - `GET /auth/me` — Should return current user
+   - `GET /tasks` — Should return tasks list
+   - `GET /cron-jobs` — Should return cron jobs
+   - `POST /tasks` — Should create task
+   - `PATCH /tasks/:id` — Should update task
+
+**Pass Criteria:**
+- [ ] All protected endpoints return 200 with valid JWT
+- [ ] Response contains expected data
+- [ ] No 401 errors with valid token
+
+---
+
+#### Test 5.2.4: JWT Token Expiration
+**Purpose:** Verify expired tokens are rejected
+
+**Test Steps:**
+1. Use an expired JWT token (or wait 24h)
+2. Call `GET /auth/me` with expired token
+3. Verify response:
+   - Status: 401
+   - Error: "Token expired" or similar
+
+**Pass Criteria:**
+- [ ] Expired tokens return 401
+- [ ] Error message clearly indicates expiration
+
+---
+
+#### Test 5.2.5: Token Refresh Flow
+**Purpose:** Verify refresh tokens work to get new access tokens
+
+**Test Steps:**
+1. Login to get `token` and `refreshToken`
+2. POST to `/auth/refresh` with:
+   ```json
+   {
+     "refreshToken": "<refresh_token>"
+   }
+   ```
+3. Verify response contains new `token` and `refreshToken`
+4. Use new token to access protected routes
+
+**Pass Criteria:**
+- [ ] Refresh endpoint returns new tokens
+- [ ] New tokens work for protected routes
+- [ ] Old refresh token is invalidated (optional)
+
+---
+
+#### Test 5.2.6: Invalid Token Handling
+**Purpose:** Verify malformed/invalid tokens are rejected
+
+**Test Steps:**
+1. Call protected endpoint with:
+   - Malformed JWT (not 3 parts)
+   - Invalid signature
+   - Missing `Authorization` header
+   - Wrong header format (`Bearer` missing)
+2. Verify all return 401
+
+**Pass Criteria:**
+- [ ] Malformed tokens return 401
+- [ ] Missing header returns 401
+- [ ] Wrong format returns 401
+
+---
+
+#### Test 5.2.7: API Key Fallback (Agent Auth)
+**Purpose:** Verify X-Agent-API-Key still works for automation
+
+**Test Steps:**
+1. Call protected endpoint with header:
+   ```
+   X-Agent-API-Key: <valid_api_key>
+   ```
+2. Verify access is granted
+3. Test with invalid key — should return 401
+
+**Pass Criteria:**
+- [ ] Valid API key grants access
+- [ ] Invalid API key returns 401
+
+---
+
+#### Test 5.2.8: Google OAuth Flow (User Auth)
+**Purpose:** Verify Google OAuth still works for users
+
+**Test Steps:**
+1. Navigate to `/auth/google`
+2. Complete OAuth flow with Google
+3. Verify callback creates session
+4. Access protected routes with session cookie
+
+**Pass Criteria:**
+- [ ] OAuth redirects to Google
+- [ ] Callback creates valid session
+- [ ] Session cookie grants access
+
+---
+
+#### Test 5.2.9: Cross-Auth Method Isolation
+**Purpose:** Verify auth methods don't interfere
+
+**Test Steps:**
+1. Login with Google OAuth (creates session)
+2. In parallel, use JWT token for API calls
+3. Verify both work independently
+4. Logout from one method — verify other still works
+
+**Pass Criteria:**
+- [ ] OAuth session doesn't affect JWT
+- [ ] JWT doesn't affect OAuth session
+- [ ] Methods are truly independent
+
+---
+
+#### Test 5.2.10: Security Headers & CORS
+**Purpose:** Verify security configurations
+
+**Test Steps:**
+1. Check response headers on auth endpoints:
+   - `X-Content-Type-Options: nosniff`
+   - `X-Frame-Options: DENY`
+   - `X-XSS-Protection: 1; mode=block`
+2. Test CORS preflight on `/auth/login`
+3. Verify no sensitive data in error messages
+
+**Pass Criteria:**
+- [ ] Security headers present
+- [ ] CORS properly configured
+- [ ] No password/token leakage in errors
+
+---
+
+### 5.3 Full Authentication Test Battery
+
+**Pre-Test Setup:**
+- [ ] Staging environment deployed with JWT changes
+- [ ] Test user account created: `admin@taskboard.local`
+- [ ] Test credentials available
+- [ ] API key available for fallback testing
+
+**Test Execution:**
+1. Run all test cases in Section 5.2
+2. Document results (pass/fail) for each
+3. Capture any error messages
+4. Verify backward compatibility (if applicable)
+
+**Post-Test Validation:**
+- [ ] All P0 tests pass (5.2.1, 5.2.2, 5.2.3)
+- [ ] No critical security issues
+- [ ] Performance acceptable (<500ms response time)
+
+**Sign-off Criteria:**
+```
+JWT Authentication QA Sign-off
+================================
+Tester: _____________
+Date: _____________
+Environment: Staging / Production
+
+Test Results:
+- Public Routes: [ ] PASS  [ ] FAIL
+- JWT Login: [ ] PASS  [ ] FAIL
+- Protected Access: [ ] PASS  [ ] FAIL
+- Token Expiry: [ ] PASS  [ ] FAIL
+- Token Refresh: [ ] PASS  [ ] FAIL
+- Invalid Tokens: [ ] PASS  [ ] FAIL
+- API Key Fallback: [ ] PASS  [ ] FAIL
+- Google OAuth: [ ] PASS  [ ] FAIL
+- Cross-Auth Isolation: [ ] PASS  [ ] FAIL
+- Security Headers: [ ] PASS  [ ] FAIL
+
+Overall: [ ] APPROVED  [ ] REJECTED
+Notes: ___________________________________
+```
+
+---
+
 ## Section 6: Execution Checklist + Sign-off
 
 ### 6.1 Pre-Deployment Checklist
