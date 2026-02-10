@@ -16,9 +16,7 @@ CREATE TABLE IF NOT EXISTS comments (
     is_edited INTEGER DEFAULT 0,
     is_deleted INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id),
-    FOREIGN KEY (parent_comment_id) REFERENCES comments(id)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Comment reactions table
@@ -28,9 +26,7 @@ CREATE TABLE IF NOT EXISTS comment_reactions (
     emoji TEXT NOT NULL,
     author_id TEXT NOT NULL,
     author_type TEXT DEFAULT 'human',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (comment_id) REFERENCES comments(id),
-    UNIQUE(comment_id, emoji, author_id)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Comment notifications table
@@ -41,10 +37,11 @@ CREATE TABLE IF NOT EXISTS comment_notifications (
     task_id INTEGER,
     comment_id INTEGER,
     is_read INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id),
-    FOREIGN KEY (comment_id) REFERENCES comments(id)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Unique constraint for reactions (one reaction per user per comment per emoji)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comment_reactions_unique ON comment_reactions(comment_id, emoji, author_id);
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_comments_task_id ON comments(task_id);

@@ -75,6 +75,66 @@ const taskPriorityField = document.getElementById('taskPriority');
 const taskBlockedField = document.getElementById('taskBlocked');
 const taskAssignedField = document.getElementById('taskAssigned');
 
+// Deep Linking: Check URL params and open modals on load
+function checkUrlForDeepLink() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const taskId = urlParams.get('task');
+    const cronId = urlParams.get('cron');
+    
+    if (taskId) {
+        debugLog('Deep link detected: task=' + taskId);
+        const task = tasks.find(t => t.id === parseInt(taskId, 10));
+        if (task) {
+            openEditModal(task);
+            return true;
+        } else {
+            debugLog('Task not found, will retry after tasks load');
+        }
+    }
+    
+    if (cronId) {
+        debugLog('Deep link detected: cron=' + cronId);
+        const cronJob = cronJobs.find(c => c.id === parseInt(cronId, 10));
+        if (cronJob) {
+            openCronJobModal(cronJob);
+            return true;
+        } else {
+            debugLog('Cron job not found, will retry after cron jobs load');
+        }
+    }
+    
+    return false;
+}
+
+// Deep Linking: Update URL when modal opens
+function updateUrlForModal(type, id) {
+    const url = new URL(window.location);
+    url.searchParams.set(type, id);
+    window.history.pushState({ modalOpen: true, type, id }, '', url);
+    debugLog(`URL updated: ${type}=${id}`);
+}
+
+// Deep Linking: Clear URL when modal closes
+function clearUrlModalParams() {
+    const url = new URL(window.location);
+    url.searchParams.delete('task');
+    url.searchParams.delete('cron');
+    window.history.pushState({}, '', url);
+    debugLog('URL params cleared');
+}
+
+// Handle browser back/forward buttons for modal state
+window.addEventListener('popstate', (event) => {
+    if (!event.state || !event.state.modalOpen) {
+        // Back button pressed, close any open modals
+        closeModal();
+        closeCronJobModal();
+    } else {
+        // Forward button or manual URL change with modal params
+        checkUrlForDeepLink();
+    }
+});
+
 // Initialize
 async function init() {
     debugLog('=== INIT START ===');
@@ -108,6 +168,9 @@ async function init() {
             currentUser = data.user;
             debugLog('User authenticated: ' + currentUser.name);
             await initializeDashboard();
+            
+            // Check for deep link after dashboard loads
+            checkUrlForDeepLink();
         } else if (meResponse.status === 401) {
             debugLog('No active session (401), showing login');
             showLoginModal();
@@ -622,6 +685,9 @@ function openNewModal() {
     if (detailsContent) detailsContent.classList.add('active');
 
     taskModal.classList.add('active');
+    
+    // Deep Linking: Clear URL params for new task
+    clearUrlModalParams();
 }
 
 function openEditModal(task) {
@@ -656,12 +722,18 @@ function openEditModal(task) {
     if (detailsContent) detailsContent.classList.add('active');
 
     taskModal.classList.add('active');
+    
+    // Deep Linking: Update URL
+    updateUrlForModal('task', task.id);
 }
 
 function closeModal() {
     taskModal.classList.remove('active');
     currentTaskIdForComments = null;
     currentComments = [];
+    
+    // Deep Linking: Clear URL params
+    clearUrlModalParams();
 }
 
 // Event Listeners
@@ -1117,6 +1189,15 @@ function openNewCronModal() {
     updatePayloadCharCount();
     
     document.getElementById('cronJobModal').classList.add('active');
+    
+    // Deep Linking: Clear URL params for new cron job
+    clearUrlModalParams();
+}
+
+// Wrapper for deep linking - opens cron job modal by job object
+function openCronJobModal(cronJob) {
+    if (!cronJob) return;
+    editCronJob(cronJob.id);
 }
 
 function editCronJob(id) {
@@ -1145,10 +1226,16 @@ function editCronJob(id) {
     
     document.getElementById('deleteCronJobBtn').style.display = 'block';
     document.getElementById('cronJobModal').classList.add('active');
+    
+    // Deep Linking: Update URL
+    updateUrlForModal('cron', job.id);
 }
 
 function closeCronModal() {
     document.getElementById('cronJobModal').classList.remove('active');
+    
+    // Deep Linking: Clear URL params
+    clearUrlModalParams();
 }
 
 // Cron Event Listeners
@@ -1631,6 +1718,7 @@ async function submitComment() {
 window.editCronJob = editCronJob;
 window.runCronJob = runCronJob;
 window.openMarkdownEditor = openMarkdownEditor;
+window.openCronJobModal = openCronJobModal;
 window.initiateGoogleAuth = initiateGoogleAuth;
 window.loadComments = loadComments;
 window.submitComment = submitComment;
