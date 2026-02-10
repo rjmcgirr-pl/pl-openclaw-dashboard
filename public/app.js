@@ -502,7 +502,7 @@ function createTaskCard(task) {
         <div class="task-header">
             <span class="task-name">${escapeHtml(task.name)}</span>
             <div class="task-badges">${badges.join('')}</div>
-            <button class="task-delete-btn" title="Delete task">&times;</button>
+            <button class="task-delete-btn" title="Delete task">🗑️</button>
         </div>
         ${description}
         <div class="task-meta">Updated: ${formatDate(task.updated_at)}</div>
