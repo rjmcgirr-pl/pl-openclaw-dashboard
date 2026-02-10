@@ -1,6 +1,7 @@
 name = "taskboard-api"
 main = "src/index.ts"
 compatibility_date = "2024-12-30"
+account_id = "926b4147f0c4510a15a7fd4cb409b0d8"
 
 # Observability - Enable logs for debugging
 [observability]
