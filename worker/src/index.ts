@@ -1985,6 +1985,11 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
       }
     }
 
+    // Increment comment_count on the task
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = comment_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(taskId).run();
+
     // Fetch the created comment
     const comment = await env.DB.prepare(
       'SELECT * FROM comments WHERE id = ?'
@@ -2053,6 +2058,11 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
       await createAgentCommentNotification(env, taskId, commentId, task.created_by);
     }
 
+    // Increment comment_count on the task
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = comment_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(taskId).run();
+
     // Fetch the created comment
     const comment = await env.DB.prepare(
       'SELECT * FROM comments WHERE id = ?'
@@ -2100,6 +2110,11 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     ).bind(taskId, claimMessage).run();
 
     const commentId = result.meta?.last_row_id;
+
+    // Increment comment_count on the task for system comment
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = comment_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(taskId).run();
 
     // Notify task creator
     const task = await env.DB.prepare(
@@ -2204,10 +2219,10 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
       return errorResponse('Unauthorized', 401, request);
     }
 
-    // Get the comment to check ownership
+    // Get the comment to check ownership and get task_id
     const comment = await env.DB.prepare(
-      'SELECT author_id, author_type FROM comments WHERE id = ? AND is_deleted = 0'
-    ).bind(commentId).first<{ author_id: string; author_type: AuthorType }>();
+      'SELECT author_id, author_type, task_id FROM comments WHERE id = ? AND is_deleted = 0'
+    ).bind(commentId).first<{ author_id: string; author_type: AuthorType; task_id: number }>();
 
     if (!comment) {
       return errorResponse('Comment not found', 404, request);
@@ -2225,6 +2240,11 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     ).bind(commentId).run();
+
+    // Decrement comment_count on the task
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = MAX(0, comment_count - 1), updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(comment.task_id).run();
 
     return jsonResponse({ message: 'Comment deleted successfully' }, 200, request);
   } catch (error) {

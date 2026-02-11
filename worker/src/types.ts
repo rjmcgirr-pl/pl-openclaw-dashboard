@@ -50,6 +50,7 @@ export interface Task {
   priority: number;
   blocked: number;
   assigned_to_agent: number;
+  comment_count: number;
   created_at: string;
   updated_at: string;
 }

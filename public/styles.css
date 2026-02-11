@@ -255,6 +255,13 @@ header h1 {
     color: black;
 }
 
+.badge-comments {
+    background-color: var(--accent-info);
+    color: white;
+    font-size: 11px;
+    padding: 2px 6px;
+}
+
 .task-description {
     font-size: 12px;
     color: var(--text-secondary);

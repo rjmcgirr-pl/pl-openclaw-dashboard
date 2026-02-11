@@ -543,6 +543,9 @@ function createTaskCard(task) {
     if (task.assigned_to_agent) {
         badges.push(`<span class="badge badge-assigned">🤖</span>`);
     }
+    if (task.comment_count > 0) {
+        badges.push(`<span class="badge badge-comments">💬 ${task.comment_count}</span>`);
+    }
 
     const description = task.description 
         ? `<div class="task-description">${escapeHtml(task.description)}</div>` 
@@ -701,6 +704,13 @@ function openEditModal(task) {
     taskAssignedField.checked = task.assigned_to_agent === 1;
     deleteTaskBtn.style.display = 'block';
     currentTaskIdForComments = task.id;
+    
+    // Update comment count badge in tab
+    const commentsTabBadge = document.getElementById('commentsTabBadge');
+    if (commentsTabBadge) {
+        commentsTabBadge.textContent = task.comment_count || 0;
+        commentsTabBadge.style.display = (task.comment_count > 0) ? 'inline' : 'none';
+    }
     
     // Attach delete handler directly to button (ensures it works)
     deleteTaskBtn.onclick = () => {
@@ -1696,10 +1706,14 @@ function renderComments() {
 
 async function submitComment() {
     const commentInput = document.getElementById('commentInput');
+    const submitCommentBtn = document.getElementById('submitCommentBtn');
     if (!commentInput || !currentTaskIdForComments) return;
 
     const content = commentInput.value.trim();
     if (!content) return;
+
+    // Disable submit button while submitting
+    if (submitCommentBtn) submitCommentBtn.disabled = true;
 
     try {
         await apiRequest(`/tasks/${currentTaskIdForComments}/comments`, {
@@ -1707,10 +1721,33 @@ async function submitComment() {
             body: JSON.stringify({ content }),
         });
         commentInput.value = '';
+        
+        // Reload comments and update count
         await loadComments(currentTaskIdForComments);
+        await refreshTaskCommentCount(currentTaskIdForComments);
     } catch (error) {
         console.error('Failed to submit comment:', error);
         showError('Failed to submit comment: ' + error.message);
+    } finally {
+        if (submitCommentBtn) submitCommentBtn.disabled = false;
+    }
+}
+
+// Helper function to refresh task comment count in modal
+async function refreshTaskCommentCount(taskId) {
+    try {
+        const data = await apiRequest(`/tasks/${taskId}`);
+        if (data.task) {
+            const commentsTabBadge = document.getElementById('commentsTabBadge');
+            if (commentsTabBadge) {
+                commentsTabBadge.textContent = data.task.comment_count || 0;
+                commentsTabBadge.style.display = (data.task.comment_count > 0) ? 'inline' : 'none';
+            }
+            // Also refresh the task in the board to update the card badge
+            await loadTasks();
+        }
+    } catch (error) {
+        console.error('Failed to refresh comment count:', error);
     }
 }
 
