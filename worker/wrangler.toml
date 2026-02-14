@@ -69,6 +69,11 @@ id = "dc82acf0e2dd40fd8f63e378d1b736be"
 binding = "SESSION_KV"
 id = "a25297fb8b76435ba06747f2e9417c62"
 
+# Durable Objects for SSE Connection Management (must be defined per environment)
+[[env.staging.durable_objects.bindings]]
+name = "SSE_CONNECTION_MANAGER"
+class_name = "SSEConnectionManager"
+
 # Production environment
 [env.production]
 name = "taskboard-api"
@@ -86,3 +91,8 @@ id = "dc82acf0e2dd40fd8f63e378d1b736be"
 [[env.production.kv_namespaces]]
 binding = "SESSION_KV"
 id = "a25297fb8b76435ba06747f2e9417c62"
+
+# Durable Objects for SSE Connection Management (must be defined per environment)
+[[env.production.durable_objects.bindings]]
+name = "SSE_CONNECTION_MANAGER"
+class_name = "SSEConnectionManager"
