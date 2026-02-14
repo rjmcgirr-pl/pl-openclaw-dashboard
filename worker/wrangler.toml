@@ -47,6 +47,9 @@ AGENT_API_KEY = "set-via-secret"
 # JWT Secret for token signing (set via GitHub Actions secret)
 JWT_SECRET = "set-via-secret"
 
+# Secrets - set via: wrangler secret put NAME --env production
+# GOOGLE_CLIENT_SECRET - Google OAuth client secret (required for OAuth flow)
+
 # For local development
 [env.local]
 vars = { ALLOWED_ORIGIN = "http://localhost:8788", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }

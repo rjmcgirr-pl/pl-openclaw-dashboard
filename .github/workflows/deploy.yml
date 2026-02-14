@@ -91,11 +91,19 @@ jobs:
             fs.writeFileSync('wrangler.toml', updated);
           "
 
+      - name: Set Staging Secrets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ./worker
+          command: |
+            secret put GOOGLE_CLIENT_SECRET --env staging << 'EOF'
+            ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
+            EOF
+
       - name: Deploy Worker to Staging
         uses: cloudflare/wrangler-action@v3
-        env:
-          GOOGLE_AUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
