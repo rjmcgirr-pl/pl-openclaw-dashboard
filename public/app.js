@@ -45,6 +45,7 @@ const CRON_STATUS_LABELS = {
 
 // State
 let tasks = [];
+let archivedTasks = [];
 let cronJobs = [];
 let draggedTask = null;
 let autoRefreshInterval = null;
@@ -433,6 +434,59 @@ async function loadTasks() {
     }
 }
 
+async function loadArchivedTasks() {
+    try {
+        const data = await apiRequest('/tasks?archived=yes');
+        archivedTasks = data.tasks || [];
+        renderArchiveList();
+    } catch (error) {
+        showError('Failed to load archived tasks: ' + error.message);
+    }
+}
+
+async function unarchiveTask(id) {
+    try {
+        await apiRequest(`/tasks/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ archived: false }),
+        });
+        showToast('Task unarchived successfully', 'success');
+        await loadArchivedTasks();
+        await loadTasks();
+    } catch (error) {
+        showError('Failed to unarchive task: ' + error.message);
+    }
+}
+
+async function copyFromArchive(task) {
+    // Open new task modal with pre-filled data from archived task
+    modalTitle.textContent = 'Copy Task from Archive';
+    taskForm.reset();
+    taskIdField.value = ''; // New task
+    taskNameField.value = task.name + ' (Copy)';
+    taskDescriptionField.value = task.description || '';
+    taskStatusField.value = 'inbox'; // Reset to inbox
+    taskPriorityField.value = task.priority || 0;
+    taskBlockedField.checked = task.blocked === 1;
+    taskAssignedField.checked = task.assigned_to_agent === 1;
+    deleteTaskBtn.style.display = 'none';
+    
+    // Hide tabs for new task
+    const tabsContainer = document.getElementById('taskModalTabs');
+    if (tabsContainer) tabsContainer.style.display = 'none';
+    
+    // Reset to Details tab
+    document.querySelectorAll('.modal-tab-btn').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
+    const detailsTab = document.querySelector('.modal-tab-btn[data-tab="details"]');
+    if (detailsTab) detailsTab.classList.add('active');
+    const detailsContent = document.getElementById('detailsTab');
+    if (detailsContent) detailsContent.classList.add('active');
+    
+    taskModal.classList.add('active');
+    clearUrlModalParams();
+}
+
 async function createTask(taskData) {
     try {
         const data = await apiRequest('/tasks', {
@@ -609,6 +663,93 @@ function renderBoard() {
     STATUSES.forEach(status => {
         document.getElementById(`count-${status}`).textContent = counts[status];
     });
+}
+
+function renderArchiveList() {
+    const container = document.getElementById('archiveList');
+    const countEl = document.getElementById('archiveCount');
+    
+    // Update count
+    if (countEl) {
+        countEl.textContent = `${archivedTasks.length} archived task${archivedTasks.length !== 1 ? 's' : ''}`;
+    }
+    
+    if (archivedTasks.length === 0) {
+        container.innerHTML = `
+            <div class="archive-empty-state">
+                <div class="archive-empty-icon">📦</div>
+                <h3>No Archived Tasks</h3>
+                <p>Archived tasks will appear here. Use "Archive Closed" to archive done tasks.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort archived tasks by updated_at desc (most recently archived first)
+    const sortedArchived = [...archivedTasks].sort((a, b) => {
+        return new Date(b.updated_at) - new Date(a.updated_at);
+    });
+    
+    container.innerHTML = sortedArchived.map(task => createArchiveTaskCard(task)).join('');
+    
+    // Attach event listeners to action buttons
+    container.querySelectorAll('.unarchive-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const taskId = parseInt(btn.dataset.taskId, 10);
+            unarchiveTask(taskId);
+        });
+    });
+    
+    container.querySelectorAll('.copy-from-archive-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const taskId = parseInt(btn.dataset.taskId, 10);
+            const task = archivedTasks.find(t => t.id === taskId);
+            if (task) {
+                copyFromArchive(task);
+            }
+        });
+    });
+}
+
+function createArchiveTaskCard(task) {
+    const badges = [];
+    if (task.priority > 0) {
+        badges.push(`<span class="badge badge-priority">P${task.priority}</span>`);
+    }
+    if (task.blocked) {
+        badges.push(`<span class="badge badge-blocked">🚫</span>`);
+    }
+    if (task.assigned_to_agent) {
+        badges.push(`<span class="badge badge-assigned">🤖</span>`);
+    }
+    if (task.comment_count > 0) {
+        badges.push(`<span class="badge badge-comments">💬 ${task.comment_count}</span>`);
+    }
+    badges.push(`<span class="badge">${STATUS_LABELS[task.status] || task.status}</span>`);
+    
+    const description = task.description 
+        ? `<div class="archive-task-description">${escapeHtml(task.description)}</div>` 
+        : '';
+    
+    return `
+        <div class="archive-task-card" data-task-id="${task.id}">
+            <div class="archive-task-header">
+                <span class="archive-task-name">${escapeHtml(task.name)}</span>
+                <div class="archive-task-badges">${badges.join('')}</div>
+            </div>
+            ${description}
+            <div class="archive-task-meta">
+                <span>Status: ${STATUS_LABELS[task.status] || task.status}</span>
+                <span>Archived: ${formatDate(task.updated_at)}</span>
+            </div>
+            <div class="archive-task-actions">
+                <button class="btn-secondary unarchive-btn" data-task-id="${task.id}">📤 Unarchive</button>
+                <button class="btn-primary copy-from-archive-btn" data-task-id="${task.id}">📋 Copy</button>
+            </div>
+        </div>
+    `;
 }
 
 function createTaskCard(task) {
@@ -906,6 +1047,12 @@ function setupEventListeners() {
     const archiveClosedBtn = document.getElementById('archiveClosedBtn');
     if (archiveClosedBtn) {
         archiveClosedBtn.addEventListener('click', openArchiveConfirmModal);
+    }
+
+    // Refresh archive button
+    const refreshArchiveBtn = document.getElementById('refreshArchiveBtn');
+    if (refreshArchiveBtn) {
+        refreshArchiveBtn.addEventListener('click', loadArchivedTasks);
     }
 
     // Archive confirmation modal
@@ -1296,6 +1443,11 @@ function switchTab(tabName) {
         content.classList.remove('active');
     });
     document.getElementById(tabName + 'Tab').classList.add('active');
+    
+    // Load archived tasks when switching to archive tab
+    if (tabName === 'archive') {
+        loadArchivedTasks();
+    }
 }
 
 // Cron Modal Functions

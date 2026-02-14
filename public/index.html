@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Task Board</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=8">
+    <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
     <div class="container">
@@ -27,6 +27,7 @@
         <!-- Tab Navigation -->
         <nav class="tab-nav">
             <button class="tab-btn active" data-tab="tasks">📋 Tasks</button>
+            <button class="tab-btn" data-tab="archive">📦 Archive</button>
             <button class="tab-btn" data-tab="cron">⏰ Cron Monitor</button>
         </nav>
 
@@ -73,6 +74,26 @@
                 <div class="column-tasks" id="col-done"></div>
             </div>
         </div>
+        </div>
+
+        <!-- Archive Tab -->
+        <div id="archiveTab" class="tab-content">
+            <div class="archive-header">
+                <div class="archive-stats">
+                    <span class="archive-count" id="archiveCount">0 archived tasks</span>
+                </div>
+                <div class="archive-actions">
+                    <button id="refreshArchiveBtn" class="btn-secondary">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="archive-list" id="archiveList">
+                <!-- Archived tasks will be rendered here -->
+                <div class="archive-empty-state">
+                    <div class="archive-empty-icon">📦</div>
+                    <h3>No Archived Tasks</h3>
+                    <p>Archived tasks will appear here. Use "Archive Closed" to archive done tasks.</p>
+                </div>
+            </div>
         </div>
 
         <!-- Cron Monitor Tab -->
@@ -422,7 +443,7 @@
                     Secure authentication powered by Google OAuth
                 </p>
                 <p id="versionInfo" style="text-align: center; color: var(--text-secondary); font-size: 10px; margin-top: 8px;">
-                    v10 - Archive Closed Tasks
+                    v11 - Archive Tab & Unarchive
                 </p>
                 <div id="debugLog" class="staging-only" style="margin-top: 15px; padding: 10px; background: #1a1a2e; border-radius: 4px; font-family: monospace; font-size: 11px; color: #00ff00; max-height: 150px; overflow-y: auto; text-align: left;">
                     <div>Debug log initializing...</div>
@@ -432,6 +453,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=18"></script>
 </body>
 </html>

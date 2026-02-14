@@ -50,6 +50,7 @@ export interface Task {
   priority: number;
   blocked: number;
   assigned_to_agent: number;
+  archived: number;
   comment_count: number;
   created_by: string | null;
   created_at: string;
@@ -63,6 +64,7 @@ export interface CreateTaskRequest {
   priority?: number;
   blocked?: boolean;
   assigned_to_agent?: boolean;
+  archived?: boolean;
 }
 
 export interface UpdateTaskRequest {
@@ -72,6 +74,7 @@ export interface UpdateTaskRequest {
   priority?: number;
   blocked?: boolean;
   assigned_to_agent?: boolean;
+  archived?: boolean;
 }
 
 // Cron Job Types

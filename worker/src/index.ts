@@ -983,6 +983,12 @@ async function listTasks(env: Env, searchParams: URLSearchParams, request: Reque
   const params: (string | number)[] = [];
   const conditions: string[] = [];
 
+  // By default, filter out archived tasks unless archived=yes is specified
+  const includeArchived = searchParams.get('archived') === 'yes';
+  if (!includeArchived) {
+    conditions.push('archived = 0');
+  }
+
   // Filter by status
   const status = searchParams.get('status');
   if (status) {
@@ -1162,6 +1168,11 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     values.push(body.assigned_to_agent ? 1 : 0);
   }
 
+  if (body.archived !== undefined) {
+    updates.push('archived = ?');
+    values.push(body.archived ? 1 : 0);
+  }
+
   // Always update the updated_at timestamp
   updates.push('updated_at = CURRENT_TIMESTAMP');
 
@@ -1240,9 +1251,9 @@ async function archiveClosedTasks(env: Env, request: Request): Promise<Response>
     }
     console.log(`[archiveClosedTasks] Admin authenticated: ${user.id}`);
 
-    // Count tasks that will be archived
+    // Count tasks that will be archived (done tasks that are not already archived)
     const countResult = await env.DB.prepare(
-      'SELECT COUNT(*) as count FROM tasks WHERE status = ?'
+      'SELECT COUNT(*) as count FROM tasks WHERE status = ? AND archived = 0'
     ).bind('done').first<{ count: number }>();
     
     const taskCount = countResult?.count || 0;
@@ -1256,10 +1267,10 @@ async function archiveClosedTasks(env: Env, request: Request): Promise<Response>
       }, 200, request);
     }
 
-    // Update all done tasks to archived
+    // Update all done tasks to set archived=1 (keep status as 'done')
     const updateResult = await env.DB.prepare(
-      'UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE status = ?'
-    ).bind('archived', 'done').run();
+      'UPDATE tasks SET archived = 1, updated_at = CURRENT_TIMESTAMP WHERE status = ? AND archived = 0'
+    ).bind('done').run();
     
     const archivedCount = updateResult.meta?.changes || taskCount;
     console.log(`[archiveClosedTasks] Successfully archived ${archivedCount} tasks`);

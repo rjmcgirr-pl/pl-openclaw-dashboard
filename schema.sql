@@ -16,6 +16,7 @@ CREATE TABLE tasks (
     priority INTEGER DEFAULT 0,
     blocked INTEGER DEFAULT 0,
     assigned_to_agent INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -60,6 +61,7 @@ CREATE TABLE cron_job_runs (
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_assigned_to_agent ON tasks(assigned_to_agent);
 CREATE INDEX idx_tasks_priority ON tasks(priority DESC);
+CREATE INDEX idx_tasks_archived ON tasks(archived);
 
 -- Create index on cron_jobs
 CREATE INDEX idx_cron_jobs_status ON cron_jobs(last_status);

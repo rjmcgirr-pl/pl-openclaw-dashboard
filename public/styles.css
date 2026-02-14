@@ -2066,3 +2066,114 @@ form {
 .toast.hiding {
     animation: toastFadeOut 0.3s ease-in forwards;
 }
+
+/* Archive Tab Styles */
+.archive-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 16px;
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.archive-stats {
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.archive-count {
+    font-weight: 500;
+}
+
+.archive-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.archive-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.archive-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    border: 1px dashed var(--border-color);
+}
+
+.archive-empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.archive-empty-state h3 {
+    font-size: 18px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.archive-task-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    transition: border-color 0.2s;
+}
+
+.archive-task-card:hover {
+    border-color: var(--accent-primary);
+}
+
+.archive-task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.archive-task-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.archive-task-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.archive-task-description {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.archive-task-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.archive-task-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.archive-task-actions button {
+    flex: 1;
+    padding: 8px 16px;
+    font-size: 13px;
+}
