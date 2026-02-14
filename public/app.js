@@ -1022,6 +1022,19 @@ function setupEventListeners() {
         }
     });
 
+    // Enter key handler for task modal - save on Enter, allow newlines in description with Shift+Enter
+    const taskModalInputs = [taskNameField, taskPriorityField];
+    taskModalInputs.forEach(input => {
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    taskForm.dispatchEvent(new Event('submit'));
+                }
+            });
+        }
+    });
+
     // Google Login button
     const googleLoginBtn = document.getElementById('googleLoginBtn');
     debugLog('Google login button found: ' + (googleLoginBtn ? 'YES' : 'NO'));
