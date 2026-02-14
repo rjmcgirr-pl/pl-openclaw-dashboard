@@ -1,9 +1,10 @@
-import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
+import type { D1Database, KVNamespace, DurableObjectNamespace } from '@cloudflare/workers-types';
 
 export interface Env {
   DB: D1Database;
   CRON_JOBS_KV: KVNamespace;
   SESSION_KV: KVNamespace;
+  SSE_CONNECTION_MANAGER?: DurableObjectNamespace;
   ALLOWED_ORIGIN?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
@@ -230,4 +231,34 @@ export interface AddReactionRequest {
 export interface ClaimTaskRequest {
   agent_id: string;
   auth_token: string;
+}
+
+// Tag Types
+export interface Tag {
+  id: number;
+  name: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface TaskTag {
+  task_id: number;
+  tag_id: number;
+  created_at: string;
+}
+
+export interface CreateTagRequest {
+  name: string;
+  color?: string;
+}
+
+export interface UpdateTagRequest {
+  name?: string;
+  color?: string;
+}
+
+export interface TaskWithTags extends Task {
+  tags?: Tag[];
 }

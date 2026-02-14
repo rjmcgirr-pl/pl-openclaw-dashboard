@@ -68,6 +68,32 @@ CREATE INDEX idx_cron_jobs_status ON cron_jobs(last_status);
 CREATE INDEX idx_cron_jobs_runs_job_id ON cron_job_runs(cron_job_id);
 CREATE INDEX idx_cron_jobs_runs_started ON cron_job_runs(started_at);
 
+-- Tags table: stores tag definitions
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL DEFAULT '#808080',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+-- Task_tags junction table: many-to-many relationship between tasks and tags
+CREATE TABLE task_tags (
+    task_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task_id, tag_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+-- Indexes for tags
+CREATE INDEX idx_tags_name ON tags(name);
+CREATE INDEX idx_task_tags_task_id ON task_tags(task_id);
+CREATE INDEX idx_task_tags_tag_id ON task_tags(tag_id);
+CREATE INDEX idx_tags_deleted_at ON tags(deleted_at);
+
 -- Insert sample tasks for testing
 INSERT INTO tasks (name, description, status, priority, blocked, assigned_to_agent) VALUES
     ('Setup D1 database', 'Initialize the taskboard database schema', 'done', 5, 0, 0),

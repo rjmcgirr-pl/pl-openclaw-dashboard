@@ -1,4 +1,7 @@
 import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType } from './types';
+import { SSEConnectionManager } from './sse/SSEConnectionManager';
+import { handleSSEConnect, handleSSEStats } from './routes/sse';
+import { emitTaskCreated, emitTaskUpdated, emitTaskDeleted } from './middleware/taskEvents';
 
 // Dynamic CORS headers - origin must match the requesting site for credentials to work
 function getCorsHeaders(request: Request): Record<string, string> {
@@ -413,6 +416,17 @@ export default {
       // POST /auth/login - JWT login (public route, no session validation)
       if (path === '/auth/login' && method === 'POST') {
         return await handleJwtLogin(request, env);
+      }
+
+      // SSE Routes - require JWT validation (handled in SSEConnectionManager)
+      // GET /sse/connect - Establish SSE connection for real-time updates
+      if (path === '/sse/connect' && method === 'GET') {
+        return await handleSSEConnect(request, env);
+      }
+
+      // GET /sse/stats - Get SSE connection statistics (admin/debug)
+      if (path === '/sse/stats' && method === 'GET') {
+        return await handleSSEStats(request, env);
       }
 
       // Validate session for all other routes
@@ -1097,6 +1111,10 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createTask] Successfully created task:', task.id);
+    
+    // Emit task.created event for SSE
+    await emitTaskCreated(env, task);
+    
     return jsonResponse({ task }, 201, request);
   } catch (error) {
     console.error('[createTask] Unexpected error:', error);
