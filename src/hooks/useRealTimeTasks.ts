@@ -21,7 +21,7 @@ import {
 } from '../types/sse';
 
 // Task interface matching SSE TaskEventData
-interface Task {
+export interface Task {
   id: number;
   name: string;
   description: string | null;

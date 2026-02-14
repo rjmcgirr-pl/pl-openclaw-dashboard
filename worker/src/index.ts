@@ -1223,6 +1223,12 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
   }
 
   console.log('[updateTask] Successfully updated task:', id);
+  
+  // Emit task.updated event for SSE (existing was fetched at start of function)
+  if (task) {
+    await emitTaskUpdated(env, task, existing);
+  }
+  
   return jsonResponse({ task }, 200, request);
   } catch (error) {
     console.error('[updateTask] Unexpected error:', error);
@@ -1245,6 +1251,10 @@ async function deleteTask(env: Env, id: number, request: Request): Promise<Respo
     try {
       await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
       console.log(`[deleteTask] Task ${id} deleted successfully`);
+      
+      // Emit task.deleted event for SSE
+      await emitTaskDeleted(env, id);
+      
       return jsonResponse({ success: true, message: 'Task deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteTask] Database delete failed:', deleteError);
@@ -2574,3 +2584,6 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
     return errorResponse('Failed to mark notifications as read', 500);
   }
 }
+
+// Export the SSE Connection Manager Durable Object
+export { SSEConnectionManager };

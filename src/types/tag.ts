@@ -7,7 +7,7 @@
  * - Tag color definitions
  */
 
-/** Available tag colors for visual differentiation */
+/** Available tag colors for visual differentiation (Tailwind color names) */
 export type TagColor = 
   | 'slate' 
   | 'red' 
@@ -28,13 +28,16 @@ export type TagColor =
   | 'pink' 
   | 'rose';
 
-/** Tag data structure */
-export interface Tag {
+/**
+ * Tag data structure (Legacy - uses string ID and TagColor)
+ * @deprecated Use Tag from '../components/TagBadge' for hex color support
+ */
+export interface TagLegacy {
   /** Unique identifier for the tag */
   id: string;
   /** Display name of the tag */
   name: string;
-  /** Color for visual identification */
+  /** Color for visual identification (Tailwind color name) */
   color: TagColor;
   /** Optional description */
   description?: string;
@@ -44,8 +47,21 @@ export interface Tag {
   usageCount?: number;
 }
 
+/**
+ * Tag data structure with hex color support
+ * Used by TagBadge component (Ticket #43)
+ */
+export interface Tag {
+  /** Unique numeric identifier for the tag */
+  id: number;
+  /** Display name of the tag */
+  name: string;
+  /** Hex color code (e.g., '#3B82F6') */
+  color: string;
+}
+
 /** Tag with selection state for dropdowns */
-export interface SelectableTag extends Tag {
+export interface SelectableTag extends TagLegacy {
   /** Whether the tag is currently selected */
   selected: boolean;
 }
@@ -105,3 +121,10 @@ export const MAX_TAGS_PER_ITEM = 5;
 
 /** Maximum visible tags before overflow */
 export const MAX_VISIBLE_TAGS = 3;
+
+/** Mock tags for testing (hex color format) */
+export const MOCK_TAGS: Tag[] = [
+  { id: 1, name: 'Sprint 1', color: '#3B82F6' },
+  { id: 2, name: 'Backend', color: '#10B981' },
+  { id: 3, name: 'Urgent', color: '#EF4444' },
+];

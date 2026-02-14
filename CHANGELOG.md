@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- SSE Infrastructure with Durable Objects (Ticket #20):
+  - New Durable Object: `SSEConnectionManager` for managing SSE connections
+  - New endpoint: `GET /sse/connect` with JWT token authentication
+  - Connection stats endpoint: `GET /sse/stats` (admin/debug use)
+  - Support for token-based authentication via query param or Authorization header
+  - CORS-enabled for cross-origin connections
+  - Automatic connection cleanup on disconnect
+
+### Added
+- Task Event Broadcasting (Ticket #22):
+  - Events emitted on task CRUD operations:
+    - `task.created` - when a new task is created
+    - `task.updated` - when a task is modified
+    - `task.deleted` - when a task is deleted
+    - `task.status_changed` - when task status changes (includes previous/new status)
+  - User-scoped broadcasting: clients only receive events they have permission for
+  - Event middleware: `worker/src/middleware/taskEvents.ts` for hooking into CRUD
+  - Broadcast utility: `worker/src/sse/broadcast.ts` for sending events
+
+### Added
 - Archive All Closed Tasks feature (Ticket #28):
   - New API endpoint: `POST /tasks/archive-closed` (admin only)
   - "📦 Archive Closed" button in header with warning styling

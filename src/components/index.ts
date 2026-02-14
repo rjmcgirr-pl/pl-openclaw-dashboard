@@ -23,3 +23,7 @@ export type { SSEProviderProps } from './SSEProvider';
 
 export { SSEIntegratedApp } from './SSEIntegratedApp';
 export type { SSEIntegrationProps } from './SSEIntegratedApp';
+
+// TagBadge Component (Ticket #43)
+export { TagBadge, TagBadgeGroup } from './TagBadge';
+export type { TagBadgeProps, TagBadgeGroupProps, Tag } from './TagBadge';

@@ -9,6 +9,16 @@ account_id = "926b4147f0c4510a15a7fd4cb409b0d8"
 enabled = true
 invocation_logs = true
 
+# Durable Objects for SSE Connection Management
+[[durable_objects.bindings]]
+name = "SSE_CONNECTION_MANAGER"
+class_name = "SSEConnectionManager"
+
+# Durable Object migration - create the namespace
+[[migrations]]
+tag = "v1"
+new_classes = ["SSEConnectionManager"]
+
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
