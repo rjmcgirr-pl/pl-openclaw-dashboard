@@ -17,6 +17,7 @@ CREATE TABLE tasks (
     blocked INTEGER DEFAULT 0,
     assigned_to_agent INTEGER DEFAULT 0,
     archived INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -93,6 +94,66 @@ CREATE INDEX idx_tags_name ON tags(name);
 CREATE INDEX idx_task_tags_task_id ON task_tags(task_id);
 CREATE INDEX idx_task_tags_tag_id ON task_tags(tag_id);
 CREATE INDEX idx_tags_deleted_at ON tags(deleted_at);
+
+-- ============================================
+-- COMMENT SYSTEM TABLES
+-- ============================================
+
+-- Comments table for task discussions
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL,
+  parent_comment_id INTEGER NULL,
+  author_type TEXT NOT NULL CHECK(author_type IN ('human', 'agent', 'system')),
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  agent_comment_type TEXT NULL CHECK(agent_comment_type IN ('status_update', 'question', 'completion', 'generic')),
+  mentions JSON,
+  is_edited INTEGER DEFAULT 0,
+  is_deleted INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_comment_id) REFERENCES comments(id) ON DELETE CASCADE
+);
+
+-- Comment reactions table
+CREATE TABLE IF NOT EXISTS comment_reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  comment_id INTEGER NOT NULL,
+  emoji TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_type TEXT NOT NULL DEFAULT 'human',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE,
+  UNIQUE(comment_id, emoji, author_id)
+);
+
+-- Comment notifications table
+CREATE TABLE IF NOT EXISTS comment_notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('mention', 'reply', 'agent_comment')),
+  task_id INTEGER NOT NULL,
+  comment_id INTEGER NOT NULL,
+  is_read INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE
+);
+
+-- Indexes for comments
+CREATE INDEX IF NOT EXISTS idx_comments_task_id ON comments(task_id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_comment_id);
+CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at);
+
+-- Indexes for reactions
+CREATE INDEX IF NOT EXISTS idx_reactions_comment_id ON comment_reactions(comment_id);
+
+-- Indexes for notifications
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON comment_notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON comment_notifications(user_id, is_read);
 
 -- Insert sample tasks for testing
 INSERT INTO tasks (name, description, status, priority, blocked, assigned_to_agent) VALUES

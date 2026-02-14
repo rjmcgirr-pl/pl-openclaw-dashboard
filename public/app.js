@@ -53,6 +53,16 @@ let cronRefreshInterval = null;
 let currentUser = null;
 let currentTab = 'tasks';
 
+// SSE State
+let sseConnection = null;
+let sseReconnectAttempts = 0;
+let sseReconnectTimer = null;
+let sseHeartbeatTimer = null;
+const SSE_MAX_RECONNECT_ATTEMPTS = 10;
+const SSE_RECONNECT_DELAY_BASE = 1000; // Start with 1 second
+const SSE_HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const recentlyUpdatedTasks = new Set(); // Track recently updated task IDs
+
 // Comments State
 let currentComments = [];
 let currentTaskId = null;
@@ -196,6 +206,7 @@ async function initializeDashboard() {
     startAutoRefresh();
     startCronAutoRefresh();
     updateUserUI();
+    initSSE(); // Initialize real-time SSE connection
     console.log('[Init] Dashboard initialized successfully');
 }
 
@@ -363,10 +374,11 @@ async function handleLogout() {
     } catch (error) {
         console.error('Logout error:', error);
     }
-    
+
     currentUser = null;
     stopAutoRefresh();
     stopCronAutoRefresh();
+    closeSSE(); // Close SSE connection on logout
     location.reload();
 }
 
@@ -760,6 +772,7 @@ function createTaskCard(task) {
 
     if (task.blocked) card.classList.add('blocked');
     if (task.assigned_to_agent) card.classList.add('assigned');
+    if (recentlyUpdatedTasks.has(task.id)) card.classList.add('recently-updated');
 
     const badges = [];
     if (task.priority > 0) {
@@ -1887,53 +1900,6 @@ function getModelDisplayName(model) {
     return MODEL_DISPLAY_NAMES[model] || model || '⚡ Gemini Flash';
 }
 
-function showToast(message, type = 'info') {
-    // Create toast element
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-
-    // Add styles if not already present
-    if (!document.getElementById('toast-styles')) {
-        const style = document.createElement('style');
-        style.id = 'toast-styles';
-        style.textContent = `
-            .toast {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                padding: 12px 20px;
-                border-radius: 8px;
-                color: white;
-                font-weight: 500;
-                z-index: 10000;
-                animation: slideIn 0.3s ease;
-                max-width: 300px;
-            }
-            .toast-success { background-color: #2ecc71; }
-            .toast-error { background-color: #e74c3c; }
-            .toast-info { background-color: #3498db; }
-            @keyframes slideIn {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-            @keyframes fadeOut {
-                from { opacity: 1; }
-                to { opacity: 0; }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    document.body.appendChild(toast);
-
-    // Remove after 3 seconds
-    setTimeout(() => {
-        toast.style.animation = 'fadeOut 0.3s ease forwards';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
 // Start the app when DOM is ready - CRITICAL: must wait for debugLog element
 function startApp() {
     debugLog('Script loaded, DOM ready');
@@ -2043,7 +2009,294 @@ window.initiateGoogleAuth = initiateGoogleAuth;
 window.loadComments = loadComments;
 window.submitComment = submitComment;
 
+// ============================================
+// SSE (Server-Sent Events) Real-time Updates
+// ============================================
+
+function initSSE() {
+    if (sseConnection) {
+        debugLog('SSE: Closing existing connection before reconnect');
+        closeSSE();
+    }
+
+    const sseUrl = `${API_BASE_URL}/sse/connect`;
+    debugLog(`SSE: Connecting to ${sseUrl}`);
+
+    try {
+        sseConnection = new EventSource(sseUrl, { withCredentials: true });
+
+        sseConnection.onopen = () => {
+            debugLog('SSE: Connection established');
+            sseReconnectAttempts = 0;
+            updateSSEStatus('connected');
+            startSSEHeartbeat();
+        };
+
+        // Listen for task events
+        sseConnection.addEventListener('task.created', handleTaskCreated);
+        sseConnection.addEventListener('task.updated', handleTaskUpdated);
+        sseConnection.addEventListener('task.deleted', handleTaskDeleted);
+        sseConnection.addEventListener('task.status_changed', handleTaskStatusChanged);
+
+        // Listen for heartbeat/ping
+        sseConnection.addEventListener('ping', handleSSEHeartbeat);
+
+        sseConnection.onerror = (error) => {
+            debugLog('SSE: Connection error occurred');
+            console.error('[SSE] Error:', error);
+            updateSSEStatus('error');
+            handleSSEReconnect();
+        };
+
+        sseConnection.onmessage = (event) => {
+            debugLog(`SSE: Received message - ${event.data.substring(0, 100)}`);
+        };
+
+    } catch (error) {
+        debugLog(`SSE: Failed to create connection - ${error.message}`);
+        console.error('[SSE] Failed to initialize:', error);
+        updateSSEStatus('error');
+        handleSSEReconnect();
+    }
+}
+
+function closeSSE() {
+    if (sseHeartbeatTimer) {
+        clearTimeout(sseHeartbeatTimer);
+        sseHeartbeatTimer = null;
+    }
+
+    if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+    }
+
+    if (sseConnection) {
+        sseConnection.close();
+        sseConnection = null;
+    }
+
+    updateSSEStatus('disconnected');
+}
+
+function handleSSEReconnect() {
+    if (sseReconnectAttempts >= SSE_MAX_RECONNECT_ATTEMPTS) {
+        debugLog('SSE: Max reconnection attempts reached');
+        updateSSEStatus('error');
+        showToast('Real-time updates disconnected. Please refresh the page.', 'error');
+        return;
+    }
+
+    sseReconnectAttempts++;
+    const delay = Math.min(SSE_RECONNECT_DELAY_BASE * Math.pow(2, sseReconnectAttempts - 1), 30000);
+
+    debugLog(`SSE: Reconnecting in ${delay}ms (attempt ${sseReconnectAttempts}/${SSE_MAX_RECONNECT_ATTEMPTS})`);
+    updateSSEStatus('reconnecting');
+
+    sseReconnectTimer = setTimeout(() => {
+        initSSE();
+    }, delay);
+}
+
+function startSSEHeartbeat() {
+    if (sseHeartbeatTimer) {
+        clearTimeout(sseHeartbeatTimer);
+    }
+
+    // If no heartbeat received within interval + buffer, reconnect
+    sseHeartbeatTimer = setTimeout(() => {
+        debugLog('SSE: Heartbeat timeout, reconnecting...');
+        handleSSEReconnect();
+    }, SSE_HEARTBEAT_INTERVAL + 10000); // 40 seconds total
+}
+
+function handleSSEHeartbeat(event) {
+    debugLog('SSE: Heartbeat received');
+    startSSEHeartbeat(); // Reset the heartbeat timer
+}
+
+function updateSSEStatus(status) {
+    const statusEl = document.getElementById('sseStatus');
+    if (!statusEl) return;
+
+    statusEl.className = `sse-status ${status}`;
+    const dot = statusEl.querySelector('.sse-status-dot');
+    const text = statusEl.querySelector('.sse-status-text');
+
+    const statusConfig = {
+        connected: { text: 'Live', title: 'Real-time updates active' },
+        disconnected: { text: 'Offline', title: 'Real-time updates disabled' },
+        reconnecting: { text: 'Reconnecting...', title: 'Attempting to reconnect...' },
+        error: { text: 'Error', title: 'Connection failed. Click to retry.' }
+    };
+
+    const config = statusConfig[status];
+    if (config && text) {
+        text.textContent = config.text;
+        statusEl.title = config.title;
+    }
+
+    // Click to retry on error
+    if (status === 'error') {
+        statusEl.onclick = () => {
+            sseReconnectAttempts = 0;
+            initSSE();
+        };
+    } else {
+        statusEl.onclick = null;
+    }
+}
+
+// Task Event Handlers
+function handleTaskCreated(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Task created - ${data.task?.name || data.task?.id}`);
+
+        // Add to tasks array
+        if (data.task && !tasks.find(t => t.id === data.task.id)) {
+            tasks.push(data.task);
+            renderBoard();
+
+            // Show toast
+            const taskName = data.task.name || 'New task';
+            showToast(`Task created: ${truncateText(taskName, 40)}`, 'info');
+
+            // Highlight the new task
+            highlightTask(data.task.id);
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling task.created:', error);
+    }
+}
+
+function handleTaskUpdated(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Task updated - ${data.task?.name || data.task?.id}`);
+
+        if (data.task) {
+            const index = tasks.findIndex(t => t.id === data.task.id);
+            if (index !== -1) {
+                tasks[index] = data.task;
+                renderBoard();
+
+                // Show toast
+                const taskName = data.task.name || 'Task';
+                showToast(`Task updated: ${truncateText(taskName, 40)}`, 'info');
+
+                // Highlight the updated task
+                highlightTask(data.task.id);
+
+                // Update modal if this task is currently open
+                if (currentTaskIdForComments === data.task.id) {
+                    updateOpenModalWithTask(data.task);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling task.updated:', error);
+    }
+}
+
+function handleTaskDeleted(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Task deleted - ${data.taskId}`);
+
+        const taskId = data.taskId;
+        const task = tasks.find(t => t.id === taskId);
+
+        if (task) {
+            // Remove from tasks array
+            tasks = tasks.filter(t => t.id !== taskId);
+            renderBoard();
+
+            // Show toast
+            const taskName = task.name || 'Task';
+            showToast(`Task deleted: ${truncateText(taskName, 40)}`, 'warning');
+
+            // Close modal if this task was open
+            if (currentTaskIdForComments === taskId) {
+                closeModal();
+            }
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling task.deleted:', error);
+    }
+}
+
+function handleTaskStatusChanged(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Task status changed - ${data.task?.name || data.task?.id} -> ${data.newStatus}`);
+
+        if (data.task) {
+            const index = tasks.findIndex(t => t.id === data.task.id);
+            if (index !== -1) {
+                tasks[index] = data.task;
+                renderBoard();
+
+                // Show toast with status change
+                const taskName = data.task.name || 'Task';
+                const statusLabel = STATUS_LABELS[data.newStatus] || data.newStatus;
+                showToast(`Moved to ${statusLabel}: ${truncateText(taskName, 30)}`, 'info');
+
+                // Highlight the task
+                highlightTask(data.task.id);
+            }
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling task.status_changed:', error);
+    }
+}
+
+function highlightTask(taskId) {
+    // Remove from set after animation completes
+    recentlyUpdatedTasks.add(taskId);
+
+    // Re-render to apply highlight class
+    renderBoard();
+
+    // Remove highlight after 3 seconds (matches CSS animation)
+    setTimeout(() => {
+        recentlyUpdatedTasks.delete(taskId);
+        const card = document.querySelector(`.task-card[data-task-id="${taskId}"]`);
+        if (card) {
+            card.classList.remove('recently-updated');
+        }
+    }, 3000);
+}
+
+function updateOpenModalWithTask(task) {
+    // Update form fields if task modal is open
+    if (taskModal.classList.contains('active')) {
+        taskNameField.value = task.name;
+        taskDescriptionField.value = task.description || '';
+        taskStatusField.value = task.status;
+        taskPriorityField.value = task.priority;
+        taskBlockedField.checked = task.blocked === 1;
+        taskAssignedField.checked = task.assigned_to_agent === 1;
+
+        // Update comment count badge
+        const commentsTabBadge = document.getElementById('commentsTabBadge');
+        if (commentsTabBadge) {
+            commentsTabBadge.textContent = task.comment_count || 0;
+            commentsTabBadge.style.display = (task.comment_count > 0) ? 'inline' : 'none';
+        }
+    }
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength - 3) + '...';
+}
+
+// ============================================
 // Start the app when DOM is ready
+// ============================================
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startApp);
 } else {
