@@ -44,8 +44,6 @@ GOOGLE_CLIENT_ID = "placeholder"
 ALLOWED_DOMAIN = "propertyllama.com"
 # Agent API Key for automation (set via wrangler secret)
 AGENT_API_KEY = "set-via-secret"
-# JWT Secret for token signing (set via GitHub Actions secret)
-JWT_SECRET = "set-via-secret"
 
 # Secrets - set via: wrangler secret put NAME --env production
 # GOOGLE_CLIENT_SECRET - Google OAuth client secret (required for OAuth flow)
@@ -97,7 +95,7 @@ class_name = "SSEConnectionManager"
 # Production environment
 [env.production]
 name = "taskboard-api"
-vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret", JWT_SECRET = "set-via-secret" }
+vars = { ALLOWED_ORIGIN = "https://openclaw.propertyllama.com", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "set-via-secret" }
 
 [[env.production.d1_databases]]
 binding = "DB"
