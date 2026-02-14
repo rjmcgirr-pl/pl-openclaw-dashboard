@@ -52,7 +52,24 @@ JWT_SECRET = "set-via-secret"
 
 # For local development
 [env.local]
-vars = { ALLOWED_ORIGIN = "http://localhost:8788", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com" }
+vars = { ALLOWED_ORIGIN = "http://localhost:8788", GOOGLE_CLIENT_ID = "placeholder", ALLOWED_DOMAIN = "propertyllama.com", AGENT_API_KEY = "local-dev-key", JWT_SECRET = "local-dev-secret" }
+
+[[env.local.d1_databases]]
+binding = "DB"
+database_name = "openclaw-taskboard-db"
+database_id = "826b8608-1376-476a-924a-bdd542ff8b45"
+
+[[env.local.kv_namespaces]]
+binding = "CRON_JOBS_KV"
+id = "dc82acf0e2dd40fd8f63e378d1b736be"
+
+[[env.local.kv_namespaces]]
+binding = "SESSION_KV"
+id = "a25297fb8b76435ba06747f2e9417c62"
+
+[[env.local.durable_objects.bindings]]
+name = "SSE_CONNECTION_MANAGER"
+class_name = "SSEConnectionManager"
 
 # Staging environment
 [env.staging]
