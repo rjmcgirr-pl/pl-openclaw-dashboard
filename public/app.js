@@ -29,7 +29,8 @@ const STATUS_LABELS = {
     up_next: '⬆️ Up Next',
     in_progress: '🔨 In Progress',
     in_review: '👀 In Review',
-    done: '✅ Done'
+    done: '✅ Done',
+    archived: '📦 Archived'
 };
 
 // Cron job status configuration
@@ -495,6 +496,87 @@ async function deleteTask(id) {
     }
 }
 
+// Archive all closed tasks
+function openArchiveConfirmModal() {
+    const modal = document.getElementById('archiveConfirmModal');
+    const messageEl = document.getElementById('archiveConfirmMessage');
+    
+    // Count done tasks
+    const doneCount = tasks.filter(t => t.status === 'done').length;
+    
+    if (messageEl) {
+        messageEl.textContent = `This will archive ${doneCount} closed task(s). This action cannot be undone.`;
+    }
+    
+    if (modal) {
+        modal.classList.add('active');
+    }
+}
+
+function closeArchiveConfirmModal() {
+    const modal = document.getElementById('archiveConfirmModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function executeArchiveClosedTasks() {
+    console.log('[Archive] Executing archive of closed tasks');
+    
+    try {
+        const response = await apiRequest('/tasks/archive-closed', {
+            method: 'POST',
+        });
+        
+        console.log('[Archive] API response:', response);
+        
+        // Close the modal
+        closeArchiveConfirmModal();
+        
+        // Show success toast
+        showToast(response.message || `${response.archived_count} task(s) archived successfully`, 'success');
+        
+        // Refresh the task list
+        await loadTasks();
+    } catch (error) {
+        console.error('[Archive] API call failed:', error);
+        closeArchiveConfirmModal();
+        showToast('Failed to archive tasks: ' + error.message, 'error');
+    }
+}
+
+// Toast notifications
+function showToast(message, type = 'info', duration = 5000) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    const icons = {
+        success: '✅',
+        error: '❌',
+        warning: '⚠️',
+        info: 'ℹ️'
+    };
+    
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || icons.info}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+        <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto-remove after duration
+    setTimeout(() => {
+        toast.classList.add('hiding');
+        toast.addEventListener('animationend', () => {
+            toast.remove();
+        });
+    }, duration);
+}
+
 // Rendering
 function renderBoard() {
     // Clear all columns
@@ -510,12 +592,17 @@ function renderBoard() {
     // Sort tasks by priority desc
     const sortedTasks = [...tasks].sort((a, b) => b.priority - a.priority);
 
-    // Render tasks
+    // Render tasks (skip archived tasks in default view)
     sortedTasks.forEach(task => {
+        // Skip archived tasks - they don't appear on the board
+        if (task.status === 'archived') return;
+        
         counts[task.status]++;
         const taskCard = createTaskCard(task);
         const col = document.getElementById(`col-${task.status}`);
-        col.appendChild(taskCard);
+        if (col) {
+            col.appendChild(taskCard);
+        }
     });
 
     // Update counts
@@ -813,6 +900,37 @@ function setupEventListeners() {
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
+    }
+
+    // Archive closed tasks button
+    const archiveClosedBtn = document.getElementById('archiveClosedBtn');
+    if (archiveClosedBtn) {
+        archiveClosedBtn.addEventListener('click', openArchiveConfirmModal);
+    }
+
+    // Archive confirmation modal
+    const closeArchiveModal = document.getElementById('closeArchiveModal');
+    const cancelArchiveBtn = document.getElementById('cancelArchiveBtn');
+    const confirmArchiveBtn = document.getElementById('confirmArchiveBtn');
+
+    if (closeArchiveModal) {
+        closeArchiveModal.addEventListener('click', closeArchiveConfirmModal);
+    }
+    if (cancelArchiveBtn) {
+        cancelArchiveBtn.addEventListener('click', closeArchiveConfirmModal);
+    }
+    if (confirmArchiveBtn) {
+        confirmArchiveBtn.addEventListener('click', executeArchiveClosedTasks);
+    }
+
+    // Close archive modal on backdrop click
+    const archiveConfirmModal = document.getElementById('archiveConfirmModal');
+    if (archiveConfirmModal) {
+        archiveConfirmModal.addEventListener('click', (e) => {
+            if (e.target === archiveConfirmModal) {
+                closeArchiveConfirmModal();
+            }
+        });
     }
 
     // Smart polling: listen for tab visibility changes

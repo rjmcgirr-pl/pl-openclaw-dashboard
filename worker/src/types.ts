@@ -46,11 +46,12 @@ export interface Task {
   id: number;
   name: string;
   description: string | null;
-  status: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done';
+  status: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done' | 'archived';
   priority: number;
   blocked: number;
   assigned_to_agent: number;
   comment_count: number;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,7 +59,7 @@ export interface Task {
 export interface CreateTaskRequest {
   name: string;
   description?: string;
-  status?: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done';
+  status?: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done' | 'archived';
   priority?: number;
   blocked?: boolean;
   assigned_to_agent?: boolean;
@@ -67,7 +68,7 @@ export interface CreateTaskRequest {
 export interface UpdateTaskRequest {
   name?: string;
   description?: string;
-  status?: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done';
+  status?: 'inbox' | 'up_next' | 'in_progress' | 'in_review' | 'done' | 'archived';
   priority?: number;
   blocked?: boolean;
   assigned_to_agent?: boolean;

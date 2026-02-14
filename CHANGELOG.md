@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Archive All Closed Tasks feature (Ticket #28):
+  - New API endpoint: `POST /tasks/archive-closed` (admin only)
+  - "📦 Archive Closed" button in header with warning styling
+  - Confirmation modal showing count of tasks to be archived
+  - Toast notifications for success/error feedback
+  - Archived tasks are filtered from default board view
+  - New 'archived' status added to task workflow
+  - Admin authentication checks via JWT, session, or Agent API Key
+
+### Added
 - Password protection for dashboard access
 - Login modal with sessionStorage persistence
 - API authentication via `X-Dashboard-Password` header

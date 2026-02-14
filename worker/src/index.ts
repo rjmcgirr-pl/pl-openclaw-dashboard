@@ -476,6 +476,19 @@ export default {
         }
       }
 
+      // POST /tasks/archive-closed - Archive all closed tasks (admin only)
+      if (path === '/tasks/archive-closed' && method === 'POST') {
+        console.log('[route] POST /tasks/archive-closed - entering archiveClosedTasks');
+        try {
+          const result = await archiveClosedTasks(env, request);
+          console.log('[route] POST /tasks/archive-closed - archiveClosedTasks completed');
+          return result;
+        } catch (err) {
+          console.error('[route] POST /tasks/archive-closed - archiveClosedTasks threw error:', err);
+          throw err;
+        }
+      }
+
       // Task Comment Routes
       // GET /tasks/:id/comments - List comments for a task
       const taskCommentsMatch = path.match(/^\/tasks\/(\d+)\/comments$/);
@@ -1025,7 +1038,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     }
 
     // Validate status if provided
-    const validStatuses = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
+    const validStatuses = ['inbox', 'up_next', 'in_progress', 'in_review', 'done', 'archived'];
     const status = body.status || 'inbox';
     if (!validStatuses.includes(status)) {
       console.log(`[createTask] Validation failed: invalid status "${status}"`);
@@ -1125,7 +1138,7 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
     }
 
     if (body.status !== undefined) {
-      const validStatuses = ['inbox', 'up_next', 'in_progress', 'in_review', 'done'];
+      const validStatuses = ['inbox', 'up_next', 'in_progress', 'in_review', 'done', 'archived'];
       if (!validStatuses.includes(body.status)) {
         console.log(`[updateTask] Validation failed: invalid status "${body.status}"`);
         return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400, request);
@@ -1212,6 +1225,88 @@ async function deleteTask(env: Env, id: number, request: Request): Promise<Respo
     console.error('[deleteTask] Unexpected error:', error);
     return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
+}
+
+// Archive all closed tasks (admin only)
+async function archiveClosedTasks(env: Env, request: Request): Promise<Response> {
+  console.log('[archiveClosedTasks] Starting archive of closed tasks');
+  
+  try {
+    // Check admin authentication
+    const user = await validateAdminAuth(request, env);
+    if (!user) {
+      console.log('[archiveClosedTasks] Admin authentication failed');
+      return errorResponse('Forbidden: Admin access required', 403, request);
+    }
+    console.log(`[archiveClosedTasks] Admin authenticated: ${user.id}`);
+
+    // Count tasks that will be archived
+    const countResult = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM tasks WHERE status = ?'
+    ).bind('done').first<{ count: number }>();
+    
+    const taskCount = countResult?.count || 0;
+    console.log(`[archiveClosedTasks] Found ${taskCount} tasks to archive`);
+    
+    if (taskCount === 0) {
+      return jsonResponse({ 
+        success: true, 
+        archived_count: 0, 
+        message: 'No closed tasks to archive' 
+      }, 200, request);
+    }
+
+    // Update all done tasks to archived
+    const updateResult = await env.DB.prepare(
+      'UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE status = ?'
+    ).bind('archived', 'done').run();
+    
+    const archivedCount = updateResult.meta?.changes || taskCount;
+    console.log(`[archiveClosedTasks] Successfully archived ${archivedCount} tasks`);
+    
+    return jsonResponse({ 
+      success: true, 
+      archived_count: archivedCount, 
+      message: `${archivedCount} task(s) archived successfully` 
+    }, 200, request);
+    
+  } catch (error) {
+    console.error('[archiveClosedTasks] Unexpected error:', error);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
+  }
+}
+
+// Helper function to validate admin authentication
+async function validateAdminAuth(request: Request, env: Env): Promise<{ id: string; email: string; name: string } | null> {
+  // Check for Agent API Key (agents have admin-like privileges)
+  const agentAuth = validateAgentApiKey(request, env);
+  if (agentAuth.valid && agentAuth.agentId) {
+    return { id: agentAuth.agentId, email: agentAuth.agentId, name: agentAuth.agentId };
+  }
+  
+  // Check for JWT Bearer token with admin role
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const payload = await verifyJwtToken(token, env);
+    if (payload) {
+      const jwtUser = payload as { type: string; id: string; email?: string; name?: string };
+      // Accept any authenticated JWT user as admin for now
+      return { 
+        id: jwtUser.id, 
+        email: jwtUser.email || jwtUser.id, 
+        name: jwtUser.name || jwtUser.id 
+      };
+    }
+  }
+  
+  // Check for session cookie (OAuth) with allowed domain
+  const session = await getSession(request, env);
+  if (session && session.email?.toLowerCase().endsWith(`@${env.ALLOWED_DOMAIN.toLowerCase()}`)) {
+    return { id: session.userId, email: session.email, name: session.name };
+  }
+  
+  return null;
 }
 
 // Cron Job Functions
