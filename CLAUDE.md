@@ -8,7 +8,7 @@ This file helps AI assistants (Claude, etc.) understand and work with this proje
 
 **Production URLs:**
 - **Dashboard:** https://openclaw.propertyllama.com
-- **API:** https://taskboard-api.rei-workers.workers.dev
+- **API:** https://openclaw.api.propertyllama.com
 
 ### Key Design Decisions
 
@@ -24,13 +24,14 @@ This file helps AI assistants (Claude, etc.) understand and work with this proje
 │  Cloudflare     │────────▶│  Cloudflare     │────▶│  Cloudflare D1  │
 │  Pages          │         │  Worker         │     │  (SQLite)       │
 │  (Frontend)     │         │  (API)          │     │  (Tasks data)   │
-│  openclaw.      │         │  taskboard-api. │     │                 │
-│  propertyllama  │         │  rei-workers.dev│     │                 │
+│  openclaw.      │         │  openclaw.api.  │     │                 │
+│  propertyllama  │         │  propertyllama  │     │                 │
 └─────────────────┘         └─────────────────┘     └─────────────────┘
        │                           ▲
-       │   X-Dashboard-Password    │
+       │   Session cookie          │
+       │   (SameSite=Lax)          │
        └───────────────────────────┘
-              User with password
+          Google OAuth + session
 ```
 
 ## Common Tasks

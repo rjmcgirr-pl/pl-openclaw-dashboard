@@ -803,14 +803,14 @@ async function handleAuthCallback(url: URL, env: Env): Promise<Response> {
     const { sessionId, session } = await createSession(userInfo, env);
 
     // Return HTML that posts message to parent window and sets cookie
-    // SameSite=None is required for cross-domain cookies
+    // SameSite=Lax works because frontend and API share .propertyllama.com
     return new Response(`
       <!DOCTYPE html>
       <html>
         <head><title>Authentication Successful</title></head>
         <body>
           <script>
-            document.cookie = '${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=None; Max-Age=604800';
+            document.cookie = '${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Domain=.propertyllama.com; Secure; SameSite=Lax; Max-Age=604800';
             window.opener.postMessage({ type: 'oauth-success', user: ${JSON.stringify(session).replace(/</g, '\\u003c')} }, '*');
             setTimeout(() => window.close(), 500);
           </script>
@@ -821,7 +821,7 @@ async function handleAuthCallback(url: URL, env: Env): Promise<Response> {
       status: 200,
       headers: {
         'Content-Type': 'text/html',
-        'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Secure; SameSite=None; Max-Age=604800`,
+        'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Domain=.propertyllama.com; Secure; SameSite=Lax; Max-Age=604800`,
       },
     });
   } catch (err) {
@@ -852,7 +852,7 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
     status: 200,
     headers: {
       ...getCorsHeaders(request),
-      'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Secure; SameSite=None; Max-Age=0`,
+      'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Domain=.propertyllama.com; Secure; SameSite=Lax; Max-Age=0`,
     },
   });
 }
