@@ -256,9 +256,10 @@ async function verifyJwtToken(token: string, env: Env): Promise<object | null> {
 
 function jsonResponse(data: unknown, status = 200, request?: Request, customHeaders?: Record<string, string>): Response {
   const corsHeaders = request ? getCorsHeaders(request) : {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': 'https://openclaw.propertyllama.com',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
     'Content-Type': 'application/json',
   };
   return new Response(JSON.stringify(data), {
@@ -649,10 +650,10 @@ export default {
         return await syncCronJobs(env, request);
       }
 
-      return errorResponse('Not found', 404);
+      return errorResponse('Not found', 404, request);
     } catch (error) {
       console.error('Error handling request:', error);
-      return errorResponse('Internal server error', 500);
+      return errorResponse('Internal server error', 500, request);
     }
   },
 };
@@ -1048,13 +1049,13 @@ async function createTask(env: Env, request: Request): Promise<Response> {
       console.log('[createTask] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[createTask] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400, request);
     }
 
     // Validate required fields
     if (!body.name || body.name.trim() === '') {
       console.log('[createTask] Validation failed: name is empty');
-      return errorResponse('Task name is required', 400);
+      return errorResponse('Task name is required', 400, request);
     }
 
     // Validate status if provided
@@ -1062,7 +1063,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     const status = body.status || 'inbox';
     if (!validStatuses.includes(status)) {
       console.log(`[createTask] Validation failed: invalid status "${status}"`);
-      return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+      return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400, request);
     }
 
     const name = body.name.trim();
@@ -1076,13 +1077,13 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     let result;
     try {
       result = await env.DB.prepare(
-        `INSERT INTO tasks (name, description, status, priority, blocked, assigned_to_agent) 
+        `INSERT INTO tasks (name, description, status, priority, blocked, assigned_to_agent)
          VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(name, description, status, priority, blocked, assignedToAgent).run();
       console.log('[createTask] Insert result:', JSON.stringify(result));
     } catch (insertError) {
       console.error('[createTask] Database insert failed:', insertError);
-      return errorResponse('Database insert failed: ' + (insertError as Error).message, 500);
+      return errorResponse('Database insert failed: ' + (insertError as Error).message, 500, request);
     }
 
     const lastRowId = result.meta?.last_row_id;
@@ -1090,7 +1091,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
 
     if (!lastRowId) {
       console.error('[createTask] No last_row_id returned from insert');
-      return errorResponse('Failed to get created task ID', 500);
+      return errorResponse('Failed to get created task ID', 500, request);
     }
 
     // Fetch the created task
@@ -1102,12 +1103,12 @@ async function createTask(env: Env, request: Request): Promise<Response> {
       console.log('[createTask] Fetched created task:', JSON.stringify(task));
     } catch (fetchError) {
       console.error('[createTask] Failed to fetch created task:', fetchError);
-      return errorResponse('Created task but failed to fetch it: ' + (fetchError as Error).message, 500);
+      return errorResponse('Created task but failed to fetch it: ' + (fetchError as Error).message, 500, request);
     }
 
     if (!task) {
       console.error('[createTask] Created task not found in database');
-      return errorResponse('Created task not found', 500);
+      return errorResponse('Created task not found', 500, request);
     }
 
     console.log('[createTask] Successfully created task:', task.id);
@@ -1386,49 +1387,49 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
       console.log('[createCronJob] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[createCronJob] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400, request);
     }
 
     // Validate required fields
     if (!body.name || body.name.trim() === '') {
       console.log('[createCronJob] Validation failed: name is empty');
-      return errorResponse('Cron job name is required', 400);
+      return errorResponse('Cron job name is required', 400, request);
     }
 
     if (!body.schedule || body.schedule.trim() === '') {
       console.log('[createCronJob] Validation failed: schedule is empty');
-      return errorResponse('Schedule is required', 400);
+      return errorResponse('Schedule is required', 400, request);
     }
 
     // Validate OpenClaw configuration fields
     const payloadValidation = validatePayload(body.payload);
     if (!payloadValidation.valid) {
       console.log('[createCronJob] Validation failed:', payloadValidation.error);
-      return errorResponse(payloadValidation.error!, 400);
+      return errorResponse(payloadValidation.error!, 400, request);
     }
 
     const modelValidation = validateModel(body.model);
     if (!modelValidation.valid) {
       console.log('[createCronJob] Validation failed:', modelValidation.error);
-      return errorResponse(modelValidation.error!, 400);
+      return errorResponse(modelValidation.error!, 400, request);
     }
 
     const thinkingValidation = validateThinking(body.thinking);
     if (!thinkingValidation.valid) {
       console.log('[createCronJob] Validation failed:', thinkingValidation.error);
-      return errorResponse(thinkingValidation.error!, 400);
+      return errorResponse(thinkingValidation.error!, 400, request);
     }
 
     const timeoutValidation = validateTimeoutSeconds(body.timeout_seconds);
     if (!timeoutValidation.valid) {
       console.log('[createCronJob] Validation failed:', timeoutValidation.error);
-      return errorResponse(timeoutValidation.error!, 400);
+      return errorResponse(timeoutValidation.error!, 400, request);
     }
 
     const deliverValidation = validateDeliver(body.deliver);
     if (!deliverValidation.valid) {
       console.log('[createCronJob] Validation failed:', deliverValidation.error);
-      return errorResponse(deliverValidation.error!, 400);
+      return errorResponse(deliverValidation.error!, 400, request);
     }
 
     const name = body.name.trim();
@@ -1461,7 +1462,7 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
       console.log('[createCronJob] Insert result:', JSON.stringify(result));
     } catch (insertError) {
       console.error('[createCronJob] Database insert failed:', insertError);
-      return errorResponse('Database insert failed: ' + (insertError as Error).message, 500);
+      return errorResponse('Database insert failed: ' + (insertError as Error).message, 500, request);
     }
 
     const lastRowId = result.meta?.last_row_id;
@@ -1469,7 +1470,7 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
 
     if (!lastRowId) {
       console.error('[createCronJob] No last_row_id returned from insert');
-      return errorResponse('Failed to get created cron job ID', 500);
+      return errorResponse('Failed to get created cron job ID', 500, request);
     }
 
     // Fetch the created cron job
@@ -1481,19 +1482,19 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
       console.log('[createCronJob] Fetched created cron job:', JSON.stringify(cronJob));
     } catch (fetchError) {
       console.error('[createCronJob] Failed to fetch created cron job:', fetchError);
-      return errorResponse('Created cron job but failed to fetch it: ' + (fetchError as Error).message, 500);
+      return errorResponse('Created cron job but failed to fetch it: ' + (fetchError as Error).message, 500, request);
     }
 
     if (!cronJob) {
       console.error('[createCronJob] Created cron job not found in database');
-      return errorResponse('Created cron job not found', 500);
+      return errorResponse('Created cron job not found', 500, request);
     }
 
     console.log('[createCronJob] Successfully created cron job:', cronJob.id);
     return jsonResponse({ cronJob }, 201);
   } catch (error) {
     console.error('[createCronJob] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -1505,7 +1506,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     if (!existing) {
       console.log(`[updateCronJob] Cron job ${id} not found`);
-      return errorResponse('Cron job not found', 404);
+      return errorResponse('Cron job not found', 404, request);
     }
     console.log(`[updateCronJob] Found existing cron job:`, JSON.stringify(existing));
 
@@ -1515,7 +1516,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       console.log('[updateCronJob] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[updateCronJob] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400, request);
     }
 
     const updates: string[] = [];
@@ -1525,7 +1526,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     if (body.name !== undefined) {
       if (body.name.trim() === '') {
         console.log('[updateCronJob] Validation failed: name cannot be empty');
-        return errorResponse('Cron job name cannot be empty', 400);
+        return errorResponse('Cron job name cannot be empty', 400, request);
       }
       updates.push('name = ?');
       values.push(body.name.trim());
@@ -1546,7 +1547,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       const payloadValidation = validatePayload(body.payload);
       if (!payloadValidation.valid) {
         console.log('[updateCronJob] Validation failed:', payloadValidation.error);
-        return errorResponse(payloadValidation.error!, 400);
+        return errorResponse(payloadValidation.error!, 400, request);
       }
       updates.push('payload = ?');
       values.push(body.payload.trim());
@@ -1556,7 +1557,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       const modelValidation = validateModel(body.model);
       if (!modelValidation.valid) {
         console.log('[updateCronJob] Validation failed:', modelValidation.error);
-        return errorResponse(modelValidation.error!, 400);
+        return errorResponse(modelValidation.error!, 400, request);
       }
       updates.push('model = ?');
       values.push(body.model);
@@ -1566,7 +1567,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       const thinkingValidation = validateThinking(body.thinking);
       if (!thinkingValidation.valid) {
         console.log('[updateCronJob] Validation failed:', thinkingValidation.error);
-        return errorResponse(thinkingValidation.error!, 400);
+        return errorResponse(thinkingValidation.error!, 400, request);
       }
       updates.push('thinking = ?');
       values.push(body.thinking);
@@ -1576,7 +1577,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       const timeoutValidation = validateTimeoutSeconds(body.timeout_seconds);
       if (!timeoutValidation.valid) {
         console.log('[updateCronJob] Validation failed:', timeoutValidation.error);
-        return errorResponse(timeoutValidation.error!, 400);
+        return errorResponse(timeoutValidation.error!, 400, request);
       }
       updates.push('timeout_seconds = ?');
       values.push(body.timeout_seconds);
@@ -1586,7 +1587,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       const deliverValidation = validateDeliver(body.deliver);
       if (!deliverValidation.valid) {
         console.log('[updateCronJob] Validation failed:', deliverValidation.error);
-        return errorResponse(deliverValidation.error!, 400);
+        return errorResponse(deliverValidation.error!, 400, request);
       }
       updates.push('deliver = ?');
       values.push(body.deliver ? 1 : 0);
@@ -1612,7 +1613,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
 
     if (updates.length === 1) {
       console.log('[updateCronJob] No fields to update');
-      return errorResponse('No fields to update', 400);
+      return errorResponse('No fields to update', 400, request);
     }
 
     values.push(id);
@@ -1624,7 +1625,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
       console.log('[updateCronJob] Update successful');
     } catch (updateError) {
       console.error('[updateCronJob] Database update failed:', updateError);
-      return errorResponse('Database update failed: ' + (updateError as Error).message, 500);
+      return errorResponse('Database update failed: ' + (updateError as Error).message, 500, request);
     }
 
     // Fetch the updated cron job
@@ -1633,7 +1634,7 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     return jsonResponse({ cronJob });
   } catch (error) {
     console.error('[updateCronJob] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -1722,7 +1723,7 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
     const existing = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     if (!existing) {
       console.log(`[endCronJob] Cron job ${id} not found`);
-      return errorResponse('Cron job not found', 404);
+      return errorResponse('Cron job not found', 404, request);
     }
     console.log(`[endCronJob] Found cron job:`, JSON.stringify(existing));
 
@@ -1732,7 +1733,7 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
       console.log('[endCronJob] Request body:', JSON.stringify(body));
     } catch (parseError) {
       console.error('[endCronJob] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON in request body: ' + (parseError as Error).message, 400, request);
     }
 
     // Validate status
@@ -1740,7 +1741,7 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
     const status = body.status;
     if (!validEndStatuses.includes(status)) {
       console.log(`[endCronJob] Invalid status: ${status}`);
-      return errorResponse(`Invalid status. Must be one of: ${validEndStatuses.join(', ')}`, 400);
+      return errorResponse(`Invalid status. Must be one of: ${validEndStatuses.join(', ')}`, 400, request);
     }
 
     const now = new Date().toISOString();
@@ -1772,11 +1773,11 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
       return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
     } catch (dbError) {
       console.error('[endCronJob] Database operation failed:', dbError);
-      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500);
+      return errorResponse('Database operation failed: ' + (dbError as Error).message, 500, request);
     }
   } catch (error) {
     console.error('[endCronJob] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -1804,12 +1805,12 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
       console.log(`[syncCronJobs] Received ${body.cronJobs?.length || 0} cron jobs to sync`);
     } catch (parseError) {
       console.error('[syncCronJobs] Failed to parse request body:', parseError);
-      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400);
+      return errorResponse('Invalid JSON: ' + (parseError as Error).message, 400, request);
     }
     
     if (!body.cronJobs || !Array.isArray(body.cronJobs)) {
       console.log('[syncCronJobs] Invalid request: cronJobs is not an array');
-      return errorResponse('Invalid request: cronJobs array required', 400);
+      return errorResponse('Invalid request: cronJobs array required', 400, request);
     }
 
     console.log('[syncCronJobs] Deleting existing cron jobs and runs...');
@@ -1820,7 +1821,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
       console.log(`[syncCronJobs] Deleted ${deleteRunsResult.meta?.changes || 0} runs, ${deleteJobsResult.meta?.changes || 0} jobs`);
     } catch (deleteError) {
       console.error('[syncCronJobs] Failed to delete existing jobs:', deleteError);
-      return errorResponse('Failed to clear existing jobs: ' + (deleteError as Error).message, 500);
+      return errorResponse('Failed to clear existing jobs: ' + (deleteError as Error).message, 500, request);
     }
 
     // Insert new cron jobs
@@ -1836,7 +1837,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const payloadValidation = validatePayload(job.payload);
         if (!payloadValidation.valid) {
           console.error(`[syncCronJobs] Job ${job.name} has invalid payload:`, payloadValidation.error);
-          return errorResponse(`Job "${job.name}": ${payloadValidation.error}`, 400);
+          return errorResponse(`Job "${job.name}": ${payloadValidation.error}`, 400, request);
         }
       }
 
@@ -1845,7 +1846,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const modelValidation = validateModel(job.model);
         if (!modelValidation.valid) {
           console.error(`[syncCronJobs] Job ${job.name} has invalid model:`, modelValidation.error);
-          return errorResponse(`Job "${job.name}": ${modelValidation.error}`, 400);
+          return errorResponse(`Job "${job.name}": ${modelValidation.error}`, 400, request);
         }
       }
 
@@ -1854,7 +1855,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const thinkingValidation = validateThinking(job.thinking);
         if (!thinkingValidation.valid) {
           console.error(`[syncCronJobs] Job ${job.name} has invalid thinking:`, thinkingValidation.error);
-          return errorResponse(`Job "${job.name}": ${thinkingValidation.error}`, 400);
+          return errorResponse(`Job "${job.name}": ${thinkingValidation.error}`, 400, request);
         }
       }
 
@@ -1863,7 +1864,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const timeoutValidation = validateTimeoutSeconds(job.timeout_seconds);
         if (!timeoutValidation.valid) {
           console.error(`[syncCronJobs] Job ${job.name} has invalid timeout:`, timeoutValidation.error);
-          return errorResponse(`Job "${job.name}": ${timeoutValidation.error}`, 400);
+          return errorResponse(`Job "${job.name}": ${timeoutValidation.error}`, 400, request);
         }
       }
 
@@ -1872,7 +1873,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         const deliverValidation = validateDeliver(job.deliver);
         if (!deliverValidation.valid) {
           console.error(`[syncCronJobs] Job ${job.name} has invalid deliver:`, deliverValidation.error);
-          return errorResponse(`Job "${job.name}": ${deliverValidation.error}`, 400);
+          return errorResponse(`Job "${job.name}": ${deliverValidation.error}`, 400, request);
         }
       }
       
@@ -1909,7 +1910,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
         }
       } catch (insertError) {
         console.error(`[syncCronJobs] Failed to insert job ${job.name}:`, insertError);
-        return errorResponse(`Failed to insert job "${job.name}": ` + (insertError as Error).message, 500);
+        return errorResponse(`Failed to insert job "${job.name}": ` + (insertError as Error).message, 500, request);
       }
     }
 
@@ -1921,7 +1922,7 @@ async function syncCronJobs(env: Env, request: Request): Promise<Response> {
     }, 201);
   } catch (error) {
     console.error('[syncCronJobs] Unexpected error:', error);
-    return errorResponse('Internal server error: ' + (error as Error).message, 500);
+    return errorResponse('Internal server error: ' + (error as Error).message, 500, request);
   }
 }
 
@@ -2483,7 +2484,7 @@ async function listNotifications(env: Env, request: Request): Promise<Response> 
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Only humans can have notifications
@@ -2497,7 +2498,7 @@ async function listNotifications(env: Env, request: Request): Promise<Response> 
 
     // Build query
     let query = `
-      SELECT 
+      SELECT
         n.*,
         t.name as task_title,
         substr(c.content, 1, 100) as comment_preview
@@ -2506,22 +2507,22 @@ async function listNotifications(env: Env, request: Request): Promise<Response> 
       LEFT JOIN comments c ON n.comment_id = c.id
       WHERE n.user_id = ?
     `;
-    
+
     if (unreadOnly) {
       query += ` AND n.is_read = 0`;
     }
-    
+
     query += ` ORDER BY n.created_at DESC LIMIT 50`;
 
     const notifications = await env.DB.prepare(query).bind(user.id).all<CommentNotification & { task_title: string; comment_preview: string }>();
 
-    return jsonResponse({ 
+    return jsonResponse({
       notifications: notifications.results || [],
       unread_count: notifications.results?.filter(n => n.is_read === 0).length || 0
     });
   } catch (error) {
     console.error('[listNotifications] Error:', error);
-    return errorResponse('Failed to fetch notifications', 500);
+    return errorResponse('Failed to fetch notifications', 500, request);
   }
 }
 
@@ -2533,12 +2534,12 @@ async function markNotificationRead(env: Env, notificationId: number, request: R
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Update the notification
     await env.DB.prepare(
-      `UPDATE comment_notifications SET 
+      `UPDATE comment_notifications SET
        is_read = 1,
        read_at = CURRENT_TIMESTAMP
        WHERE id = ? AND user_id = ?`
@@ -2547,7 +2548,7 @@ async function markNotificationRead(env: Env, notificationId: number, request: R
     return jsonResponse({ message: 'Notification marked as read' });
   } catch (error) {
     console.error('[markNotificationRead] Error:', error);
-    return errorResponse('Failed to mark notification as read', 500);
+    return errorResponse('Failed to mark notification as read', 500, request);
   }
 }
 
@@ -2559,7 +2560,7 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
     // Validate user auth
     const user = await getCurrentUser(request, env);
     if (!user) {
-      return errorResponse('Unauthorized', 401);
+      return errorResponse('Unauthorized', 401, request);
     }
 
     // Only humans can have notifications
@@ -2569,19 +2570,19 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
 
     // Update all unread notifications for this user
     const result = await env.DB.prepare(
-      `UPDATE comment_notifications SET 
+      `UPDATE comment_notifications SET
        is_read = 1,
        read_at = CURRENT_TIMESTAMP
        WHERE user_id = ? AND is_read = 0`
     ).bind(user.id).run();
 
-    return jsonResponse({ 
+    return jsonResponse({
       message: 'All notifications marked as read',
       marked_count: result.meta?.changes || 0
     });
   } catch (error) {
     console.error('[markAllNotificationsRead] Error:', error);
-    return errorResponse('Failed to mark notifications as read', 500);
+    return errorResponse('Failed to mark notifications as read', 500, request);
   }
 }
 
