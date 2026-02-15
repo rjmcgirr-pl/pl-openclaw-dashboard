@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Task Board</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=9">
+    <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
     <div class="container">
@@ -46,6 +46,7 @@
         <!-- Tab Navigation -->
         <nav class="tab-nav">
             <button class="tab-btn active" data-tab="tasks">📋 Tasks</button>
+            <button class="tab-btn" data-tab="activity">📊 Activity</button>
             <button class="tab-btn" data-tab="archive">📦 Archive</button>
             <button class="tab-btn" data-tab="cron">⏰ Cron Monitor</button>
             <button class="tab-btn admin-only" data-tab="admin" id="adminTabBtn" style="display:none;">Admin</button>
@@ -94,6 +95,36 @@
                 <div class="column-tasks" id="col-done"></div>
             </div>
         </div>
+        </div>
+
+        <!-- Activity Tab -->
+        <div id="activityTab" class="tab-content">
+            <div class="activity-header">
+                <div class="activity-search">
+                    <input type="text" id="activitySearchInput" class="activity-search-input" placeholder="Search activity..." />
+                </div>
+                <div class="activity-filters" id="activityFilters">
+                    <button class="activity-filter-chip active" data-type="all">All</button>
+                    <button class="activity-filter-chip" data-type="task.created">Task Created</button>
+                    <button class="activity-filter-chip" data-type="task.updated">Task Updated</button>
+                    <button class="activity-filter-chip" data-type="task.status_changed">Status Changed</button>
+                    <button class="activity-filter-chip" data-type="task.deleted">Task Deleted</button>
+                    <button class="activity-filter-chip" data-type="task.archived">Task Archived</button>
+                    <button class="activity-filter-chip" data-type="comment.created">Comment</button>
+                    <button class="activity-filter-chip" data-type="comment.updated">Comment Edited</button>
+                    <button class="activity-filter-chip" data-type="comment.deleted">Comment Deleted</button>
+                    <button class="activity-filter-chip" data-type="task.claimed">Task Claimed</button>
+                    <button class="activity-filter-chip" data-type="task.released">Task Released</button>
+                    <button class="activity-filter-chip" data-type="cron_job">Cron Job</button>
+                    <button class="activity-filter-chip" data-type="reaction">Reaction</button>
+                </div>
+            </div>
+            <div class="activity-feed" id="activityFeed">
+                <div class="activity-loading">Loading activity...</div>
+            </div>
+            <div class="activity-load-more" id="activityLoadMore" style="display:none;">
+                <button class="btn-secondary" onclick="loadMoreActivities()">Load More</button>
+            </div>
         </div>
 
         <!-- Archive Tab -->
@@ -190,6 +221,7 @@
                     💬 Comments
                     <span class="tab-badge" id="commentsTabBadge">0</span>
                 </button>
+                <button class="modal-tab-btn" data-tab="taskActivity">📊 Activity</button>
             </div>
             
             <!-- Details Tab -->
@@ -242,6 +274,13 @@
                 </form>
             </div>
             
+            <!-- Task Activity Tab -->
+            <div id="taskActivityTab" class="modal-tab-content">
+                <div class="task-activity-feed" id="taskActivityFeed">
+                    <div class="activity-loading">Loading activity...</div>
+                </div>
+            </div>
+
             <!-- Comments Tab -->
             <div id="commentsTab" class="modal-tab-content">
                 <div class="comments-container">
@@ -500,6 +539,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=19"></script>
 </body>
 </html>

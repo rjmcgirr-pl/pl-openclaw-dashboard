@@ -13,13 +13,14 @@ export interface SSEConnection {
 }
 
 export interface TaskEvent {
-  type: 'task.created' | 'task.updated' | 'task.deleted' | 'task.status_changed' | 'notification.created' | 'comment.created';
+  type: 'task.created' | 'task.updated' | 'task.deleted' | 'task.status_changed' | 'notification.created' | 'comment.created' | 'activity.created';
   taskId: number;
   task?: Record<string, unknown>;
   previousStatus?: string;
   newStatus?: string;
   notification?: Record<string, unknown>;
   comment?: Record<string, unknown>;
+  activity?: Record<string, unknown>;
   timestamp: string;
   userId?: string;
 }

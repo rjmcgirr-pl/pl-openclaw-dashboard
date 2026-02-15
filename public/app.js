@@ -212,6 +212,7 @@ async function initializeDashboard() {
     loadNotifications(); // Load unread notifications
     startNotificationRefresh(); // Poll for new notifications
     setupAdminPanel(); // Show admin tab if user is admin
+    setupActivityFilters(); // Set up activity filter chips and search
     console.log('[Init] Dashboard initialized successfully');
 }
 
@@ -1139,6 +1140,11 @@ function setupEventListeners() {
             if (tabName === 'comments' && currentTaskIdForComments) {
                 loadComments(currentTaskIdForComments);
             }
+
+            // Load task activity if task activity tab is clicked
+            if (tabName === 'taskActivity' && currentTaskIdForComments) {
+                loadTaskActivities(currentTaskIdForComments);
+            }
         });
     });
 
@@ -1281,6 +1287,24 @@ function escapeHtml(text) {
 function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Relative time: <1 day = "Xh Ym ago" or "Xm ago"; >=1 day = full datetime
+function formatRelativeTime(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+
+    if (diffMs < 0) return 'just now';
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) {
+        const remainMins = diffMins % 60;
+        return remainMins > 0 ? `${diffHours}h ${remainMins}m ago` : `${diffHours}h ago`;
+    }
+    return formatDate(dateString);
 }
 
 function showError(message) {
@@ -1517,6 +1541,17 @@ function switchTab(tabName) {
         content.classList.remove('active');
     });
     document.getElementById(tabName + 'Tab').classList.add('active');
+
+    // Load activity when switching to activity tab
+    if (tabName === 'activity') {
+        loadActivities();
+        // Clear the badge
+        const activityTabBtn = document.querySelector('.tab-btn[data-tab="activity"]');
+        if (activityTabBtn) {
+            const badge = activityTabBtn.querySelector('.activity-tab-badge');
+            if (badge) badge.remove();
+        }
+    }
 
     // Load archived tasks when switching to archive tab
     if (tabName === 'archive') {
@@ -2468,7 +2503,7 @@ function renderNotificationPanel() {
         const icon = typeIcons[n.type] || '💬';
         const preview = escapeHtml(n.comment_preview || '');
         const taskTitle = escapeHtml(n.task_title || 'Task');
-        const time = formatDate(n.created_at);
+        const time = formatRelativeTime(n.created_at);
         return `<div class="notification-item ${n.is_read ? '' : 'unread'}" onclick="markNotificationRead(${n.id}, ${n.task_id})">
             <span class="notification-icon">${icon}</span>
             <div class="notification-content">
@@ -2565,9 +2600,10 @@ async function initSSE() {
         sseConnection.addEventListener('task.deleted', handleTaskDeleted);
         sseConnection.addEventListener('task.status_changed', handleTaskStatusChanged);
 
-        // Listen for notification and comment events
+        // Listen for notification, comment, and activity events
         sseConnection.addEventListener('notification.created', handleNotificationCreated);
         sseConnection.addEventListener('comment.created', handleCommentCreated);
+        sseConnection.addEventListener('activity.created', handleActivityCreated);
 
         // Listen for heartbeat/ping
         sseConnection.addEventListener('ping', handleSSEHeartbeat);
@@ -2581,6 +2617,28 @@ async function initSSE() {
 
         sseConnection.onmessage = (event) => {
             debugLog(`SSE: Received message - ${event.data.substring(0, 100)}`);
+
+            // Dispatch to named event handlers based on the type field in the JSON payload
+            try {
+                const parsed = JSON.parse(event.data);
+                if (parsed.type) {
+                    const handlers = {
+                        'task.created': handleTaskCreated,
+                        'task.updated': handleTaskUpdated,
+                        'task.deleted': handleTaskDeleted,
+                        'task.status_changed': handleTaskStatusChanged,
+                        'notification.created': handleNotificationCreated,
+                        'comment.created': handleCommentCreated,
+                        'activity.created': handleActivityCreated,
+                    };
+                    const handler = handlers[parsed.type];
+                    if (handler) {
+                        handler({ data: event.data });
+                    }
+                }
+            } catch (e) {
+                // Not JSON or no type field - ignore
+            }
         };
 
     } catch (error) {
@@ -2861,6 +2919,303 @@ function truncateText(text, maxLength) {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + '...';
 }
+
+// ============================================
+// ACTIVITY LOG FUNCTIONS
+// ============================================
+
+let activities = [];
+let activityFilters = []; // empty means all types
+let activitySearchQuery = '';
+let activityOffset = 0;
+const ACTIVITY_PAGE_SIZE = 50;
+
+// Activity type configuration
+const ACTIVITY_TYPE_ICONS = {
+    'task.created': '✨',
+    'task.updated': '✏️',
+    'task.deleted': '🗑️',
+    'task.status_changed': '🔄',
+    'task.archived': '📦',
+    'comment.created': '💬',
+    'comment.updated': '✏️',
+    'comment.deleted': '🗑️',
+    'reaction.added': '😀',
+    'reaction.removed': '😶',
+    'cron_job.created': '⏰',
+    'cron_job.updated': '⏰',
+    'cron_job.deleted': '🗑️',
+    'cron_job.started': '▶️',
+    'cron_job.ended': '⏹️',
+    'task.claimed': '🤖',
+    'task.released': '🔓',
+};
+
+const ACTIVITY_ACTOR_ICONS = {
+    'human': '👤',
+    'agent': '🤖',
+    'system': '⚙️',
+};
+
+async function loadActivities(append = false) {
+    if (!append) {
+        activityOffset = 0;
+        activities = [];
+    }
+
+    try {
+        // Build query params
+        const params = new URLSearchParams();
+        params.set('limit', ACTIVITY_PAGE_SIZE);
+        params.set('offset', activityOffset);
+
+        if (activityFilters.length > 0) {
+            params.set('type', activityFilters.join(','));
+        }
+        if (activitySearchQuery) {
+            params.set('search', activitySearchQuery);
+        }
+
+        const data = await apiRequest(`/activity?${params.toString()}`);
+        const newActivities = data.activities || [];
+
+        if (append) {
+            activities = [...activities, ...newActivities];
+        } else {
+            activities = newActivities;
+        }
+
+        renderActivityFeed();
+
+        // Show/hide load more button
+        const loadMoreEl = document.getElementById('activityLoadMore');
+        if (loadMoreEl) {
+            loadMoreEl.style.display = newActivities.length >= ACTIVITY_PAGE_SIZE ? '' : 'none';
+        }
+    } catch (error) {
+        console.error('Failed to load activities:', error);
+        const feed = document.getElementById('activityFeed');
+        if (feed && !append) {
+            feed.innerHTML = '<div class="activity-empty">Failed to load activity. <button onclick="loadActivities()" class="btn-link">Try again</button></div>';
+        }
+    }
+}
+
+function loadMoreActivities() {
+    activityOffset += ACTIVITY_PAGE_SIZE;
+    loadActivities(true);
+}
+
+function renderActivityFeed() {
+    const feed = document.getElementById('activityFeed');
+    if (!feed) return;
+
+    if (activities.length === 0) {
+        feed.innerHTML = '<div class="activity-empty"><div class="activity-empty-icon">📊</div><h3>No Activity</h3><p>Activity events will appear here as changes are made.</p></div>';
+        return;
+    }
+
+    feed.innerHTML = activities.map(a => renderActivityItem(a)).join('');
+}
+
+function renderActivityItem(activity) {
+    const icon = ACTIVITY_TYPE_ICONS[activity.action_type] || '📌';
+    const actorIcon = ACTIVITY_ACTOR_ICONS[activity.actor_type] || '👤';
+    const time = formatRelativeTime(activity.created_at);
+
+    // Build the rich summary line
+    const actorName = escapeHtml(activity.actor_name || activity.actor_id);
+    const summary = escapeHtml(activity.summary);
+
+    // Build task link if task_id exists
+    let taskLink = '';
+    if (activity.task_id && activity.task_name) {
+        taskLink = `<a class="activity-task-link" href="javascript:void(0)" onclick="openActivityTaskLink(${activity.task_id})">#${activity.task_id} - ${escapeHtml(activity.task_name)}</a>`;
+    } else if (activity.task_id) {
+        taskLink = `<a class="activity-task-link" href="javascript:void(0)" onclick="openActivityTaskLink(${activity.task_id})">#${activity.task_id}</a>`;
+    }
+
+    // Parse details JSON for extra context
+    let detailsHtml = '';
+    if (activity.details) {
+        try {
+            const details = typeof activity.details === 'string' ? JSON.parse(activity.details) : activity.details;
+            if (details.comment_preview) {
+                detailsHtml = `<div class="activity-detail-preview">"${escapeHtml(truncateText(details.comment_preview, 120))}"</div>`;
+            }
+            if (details.previous_status && details.new_status) {
+                const prevLabel = STATUS_LABELS[details.previous_status] || details.previous_status;
+                const newLabel = STATUS_LABELS[details.new_status] || details.new_status;
+                detailsHtml = `<div class="activity-detail-status">${prevLabel} → ${newLabel}</div>`;
+            }
+            if (details.changes) {
+                detailsHtml = `<div class="activity-detail-preview">${escapeHtml(truncateText(details.changes, 120))}</div>`;
+            }
+        } catch (e) {
+            // ignore parse errors
+        }
+    }
+
+    return `
+        <div class="activity-item" data-type="${activity.action_type}">
+            <div class="activity-icon">${icon}</div>
+            <div class="activity-body">
+                <div class="activity-summary">
+                    <span class="activity-actor">${actorIcon} ${actorName}</span>
+                    <span class="activity-action">${summary}</span>
+                    ${taskLink ? `<span class="activity-task-ref">${taskLink}</span>` : ''}
+                </div>
+                ${detailsHtml}
+                <div class="activity-time">${time}</div>
+            </div>
+        </div>
+    `;
+}
+
+function openActivityTaskLink(taskId) {
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+        openEditModal(task);
+    } else {
+        // Task might be archived or deleted - try switching to tasks tab first
+        switchTab('tasks');
+        showToast(`Task #${taskId} not found on the board (may be archived or deleted)`, 'warning');
+    }
+}
+
+function setupActivityFilters() {
+    const filtersContainer = document.getElementById('activityFilters');
+    if (!filtersContainer) return;
+
+    filtersContainer.addEventListener('click', (e) => {
+        const chip = e.target.closest('.activity-filter-chip');
+        if (!chip) return;
+
+        const type = chip.dataset.type;
+
+        if (type === 'all') {
+            // Clear all filters
+            activityFilters = [];
+            filtersContainer.querySelectorAll('.activity-filter-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+        } else {
+            // Remove "All" active state
+            const allChip = filtersContainer.querySelector('.activity-filter-chip[data-type="all"]');
+            if (allChip) allChip.classList.remove('active');
+
+            // Toggle this filter
+            chip.classList.toggle('active');
+
+            // Build activityFilters from active chips
+            activityFilters = [];
+            filtersContainer.querySelectorAll('.activity-filter-chip.active').forEach(c => {
+                const t = c.dataset.type;
+                if (t && t !== 'all') {
+                    // Expand grouped filters
+                    if (t === 'cron_job') {
+                        activityFilters.push('cron_job.created', 'cron_job.updated', 'cron_job.deleted', 'cron_job.started', 'cron_job.ended');
+                    } else if (t === 'reaction') {
+                        activityFilters.push('reaction.added', 'reaction.removed');
+                    } else {
+                        activityFilters.push(t);
+                    }
+                }
+            });
+
+            // If nothing is active, re-activate "All"
+            if (activityFilters.length === 0 && allChip) {
+                allChip.classList.add('active');
+            }
+        }
+
+        loadActivities();
+    });
+
+    // Search input
+    const searchInput = document.getElementById('activitySearchInput');
+    if (searchInput) {
+        let searchTimeout;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                activitySearchQuery = searchInput.value.trim();
+                loadActivities();
+            }, 300);
+        });
+    }
+}
+
+// Task modal activity tab
+async function loadTaskActivities(taskId) {
+    const feed = document.getElementById('taskActivityFeed');
+    if (!feed) return;
+
+    feed.innerHTML = '<div class="activity-loading">Loading activity...</div>';
+
+    try {
+        const data = await apiRequest(`/activity?task_id=${taskId}&limit=50`);
+        const taskActivities = data.activities || [];
+
+        if (taskActivities.length === 0) {
+            feed.innerHTML = '<div class="activity-empty"><div class="activity-empty-icon">📊</div><p>No activity for this task yet.</p></div>';
+            return;
+        }
+
+        feed.innerHTML = taskActivities.map(a => renderActivityItem(a)).join('');
+    } catch (error) {
+        console.error('Failed to load task activities:', error);
+        feed.innerHTML = '<div class="activity-empty">Failed to load activity.</div>';
+    }
+}
+
+// SSE handler for activity.created
+function handleActivityCreated(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Activity created - ${data.activity?.action_type}`);
+
+        if (data.activity) {
+            // Prepend to the global activity feed if we're on the activity tab
+            if (currentTab === 'activity') {
+                activities.unshift(data.activity);
+                renderActivityFeed();
+            }
+
+            // Update task modal activity tab if open and matches task
+            if (currentTaskIdForComments && data.activity.task_id === currentTaskIdForComments) {
+                const feed = document.getElementById('taskActivityFeed');
+                if (feed && feed.closest('.modal-tab-content.active')) {
+                    // Prepend the new activity item
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = renderActivityItem(data.activity);
+                    const newItem = tempDiv.firstElementChild;
+                    if (newItem) {
+                        newItem.classList.add('activity-item-new');
+                        feed.prepend(newItem);
+                    }
+                }
+            }
+
+            // Show badge on activity tab if not currently viewing it
+            if (currentTab !== 'activity') {
+                const activityTabBtn = document.querySelector('.tab-btn[data-tab="activity"]');
+                if (activityTabBtn && !activityTabBtn.querySelector('.activity-tab-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'activity-tab-badge';
+                    badge.textContent = '●';
+                    activityTabBtn.appendChild(badge);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling activity.created:', error);
+    }
+}
+
+// Make activity functions globally accessible
+window.loadActivities = loadActivities;
+window.loadMoreActivities = loadMoreActivities;
+window.openActivityTaskLink = openActivityTaskLink;
 
 // ============================================
 // ADMIN PANEL FUNCTIONS

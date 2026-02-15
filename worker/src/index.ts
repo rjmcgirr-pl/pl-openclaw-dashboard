@@ -2,7 +2,8 @@ import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobR
 import { SSEConnectionManager } from './sse/SSEConnectionManager';
 import { handleSSEConnect, handleSSEStats } from './routes/sse';
 import { emitTaskCreated, emitTaskUpdated, emitTaskDeleted } from './middleware/taskEvents';
-import { broadcastNotification, broadcastCommentCreated } from './sse/broadcast';
+import { broadcastNotification, broadcastCommentCreated, broadcastActivity } from './sse/broadcast';
+import type { ActivityActionType, ActivityLog } from './types';
 
 // Dynamic CORS headers - origin must match the requesting site for credentials to work
 function getCorsHeaders(request: Request): Record<string, string> {
@@ -153,18 +154,42 @@ function validateEmailDomain(email: string, allowedDomain: string): boolean {
 }
 
 // Agent API Key validation helper
-function validateAgentApiKey(request: Request, env: Env): { valid: boolean; agentId?: string } {
+function validateAgentApiKey(request: Request, env: Env): { valid: boolean; agentId?: string; agentName?: string } {
   const apiKey = request.headers.get('X-Agent-API-Key');
   if (!apiKey || !env.AGENT_API_KEY) {
     return { valid: false };
   }
-  
-  // Simple API key validation - in production could check KV for multiple keys
+
   if (apiKey === env.AGENT_API_KEY) {
-    return { valid: true, agentId: 'clawdbot' };
+    const agentName = request.headers.get('X-Agent-Name')?.trim() || undefined;
+    return { valid: true, agentId: 'clawdbot', agentName };
   }
-  
+
   return { valid: false };
+}
+
+// Require X-Agent-Name on mutating requests. Returns verbose error or null.
+function requireAgentName(request: Request, env: Env): Response | null {
+  const method = request.method;
+  if (method === 'GET' || method === 'OPTIONS' || method === 'HEAD') {
+    return null; // Read-only requests don't require agent name
+  }
+  const agentAuth = validateAgentApiKey(request, env);
+  if (!agentAuth.valid) {
+    return null; // Not an agent request, skip this check
+  }
+  if (!agentAuth.agentName) {
+    return new Response(JSON.stringify({
+      error: "Agent identification required. You must provide the 'X-Agent-Name' header with a human-readable display name (e.g., 'QA Agent', 'Deploy Bot'). This is used to identify your actions in the activity log and notifications.",
+      field: 'X-Agent-Name',
+      hint: "Add the header 'X-Agent-Name: Your Agent Name' to all POST, PATCH, and DELETE requests. The 'X-Agent-API-Key' header was valid but 'X-Agent-Name' is also required for all mutating requests.",
+      example: { headers: { 'X-Agent-API-Key': '<your-key>', 'X-Agent-Name': 'QA Agent' } }
+    }), {
+      status: 400,
+      headers: { ...getCorsHeaders(request), 'Content-Type': 'application/json' },
+    });
+  }
+  return null;
 }
 
 // Get current user identity (from session or agent API key)
@@ -172,15 +197,15 @@ async function getCurrentUser(request: Request, env: Env): Promise<{ type: 'huma
   // Check for agent auth first
   const agentAuth = validateAgentApiKey(request, env);
   if (agentAuth.valid && agentAuth.agentId) {
-    return { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentId };
+    return { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentName || agentAuth.agentId };
   }
-  
+
   // Check for session
   const session = await getSession(request, env);
   if (session) {
     return { type: 'human', id: session.email, name: session.name };
   }
-  
+
   return null;
 }
 
@@ -205,6 +230,40 @@ async function getAdminSetting(key: string, env: Env, defaultValue: string): Pro
     return result?.value ?? defaultValue;
   } catch {
     return defaultValue;
+  }
+}
+
+// Log an activity to the activity_log table and broadcast via SSE. Fire-and-forget.
+async function logActivity(env: Env, params: {
+  actionType: ActivityActionType;
+  actorType: 'human' | 'agent' | 'system';
+  actorId: string;
+  actorName: string;
+  resourceType: 'task' | 'comment' | 'cron_job' | 'reaction';
+  resourceId: number;
+  taskId?: number | null;
+  taskName?: string | null;
+  summary: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const detailsJson = params.details ? JSON.stringify(params.details) : null;
+    const result = await env.DB.prepare(
+      `INSERT INTO activity_log (action_type, actor_type, actor_id, actor_name, resource_type, resource_id, task_id, task_name, summary, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      params.actionType, params.actorType, params.actorId, params.actorName,
+      params.resourceType, params.resourceId,
+      params.taskId ?? null, params.taskName ?? null,
+      params.summary, detailsJson
+    ).run();
+    const activityId = result.meta?.last_row_id;
+    // Broadcast via SSE
+    await broadcastActivity(env, {
+      id: activityId, ...params, details: detailsJson, created_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[logActivity] Failed to log activity (non-fatal):', error);
   }
 }
 
@@ -488,6 +547,18 @@ export default {
       if (sessionError) {
         return sessionError;
       }
+
+      // Require X-Agent-Name header on agent mutating requests
+      const agentNameError = requireAgentName(request, env);
+      if (agentNameError) {
+        return agentNameError;
+      }
+
+      // GET /activity - Activity log feed
+      if (path === '/activity' && method === 'GET') {
+        return await listActivities(env, url.searchParams, request);
+      }
+
       // GET /tasks - List all tasks
       if (path === '/tasks' && method === 'GET') {
         return await listTasks(env, url.searchParams, request);
@@ -1158,7 +1229,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     // Validate required fields
     if (!body.name || body.name.trim() === '') {
       console.log('[createTask] Validation failed: name is empty');
-      return errorResponse('Task name is required', 400);
+      return jsonResponse({ error: 'Task name is required. Provide a non-empty "name" string in the request body.', field: 'name', hint: 'Example: { "name": "My Task", "status": "inbox" }' }, 400, request);
     }
 
     // Validate status if provided
@@ -1166,7 +1237,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     const status = body.status || 'inbox';
     if (!validStatuses.includes(status)) {
       console.log(`[createTask] Validation failed: invalid status "${status}"`);
-      return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+      return jsonResponse({ error: `Invalid status "${status}". Must be one of: ${validStatuses.join(', ')}`, field: 'status', hint: `Provide a valid status string. Common values: "inbox" (default), "in_progress", "done". You sent: "${status}"` }, 400, request);
     }
 
     const name = body.name.trim();
@@ -1215,10 +1286,21 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createTask] Successfully created task:', task.id);
-    
+
     // Emit task.created event for SSE
     await emitTaskCreated(env, task);
-    
+
+    // Log activity
+    const currentUser = await getCurrentUser(request, env);
+    const actorName = currentUser?.name || 'Unknown';
+    const actorType = currentUser?.type || 'human';
+    const actorId = currentUser?.id || 'unknown';
+    await logActivity(env, {
+      actionType: 'task.created', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+      resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+      summary: `${actorName} created task #${task.id} - "${task.name}"`,
+    });
+
     return jsonResponse({ task }, 201, request);
   } catch (error) {
     console.error('[createTask] Unexpected error:', error);
@@ -1327,12 +1409,35 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
   }
 
   console.log('[updateTask] Successfully updated task:', id);
-  
+
   // Emit task.updated event for SSE (existing was fetched at start of function)
   if (task) {
     await emitTaskUpdated(env, task, existing);
+
+    // Log activity
+    const currentUser = await getCurrentUser(request, env);
+    const actorName = currentUser?.name || 'Unknown';
+    const actorType = currentUser?.type || 'human';
+    const actorId = currentUser?.id || 'unknown';
+    const changedFields = Object.keys(body).filter(k => (body as Record<string, unknown>)[k] !== undefined);
+
+    if (existing.status !== task.status) {
+      await logActivity(env, {
+        actionType: 'task.status_changed', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+        resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+        summary: `${actorName} moved task #${task.id} - "${task.name}" from ${existing.status} to ${task.status}`,
+        details: { previousStatus: existing.status, newStatus: task.status },
+      });
+    } else {
+      await logActivity(env, {
+        actionType: 'task.updated', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+        resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+        summary: `${actorName} updated task #${task.id} - "${task.name}" (${changedFields.join(', ')})`,
+        details: { changedFields },
+      });
+    }
   }
-  
+
   return jsonResponse({ task }, 200, request);
   } catch (error) {
     console.error('[updateTask] Unexpected error:', error);
@@ -1358,7 +1463,17 @@ async function deleteTask(env: Env, id: number, request: Request): Promise<Respo
       
       // Emit task.deleted event for SSE
       await emitTaskDeleted(env, id);
-      
+
+      // Log activity
+      const currentUser = await getCurrentUser(request, env);
+      const actorName = currentUser?.name || 'Unknown';
+      await logActivity(env, {
+        actionType: 'task.deleted', actorType: (currentUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: currentUser?.id || 'unknown', actorName,
+        resourceType: 'task', resourceId: id, taskId: id, taskName: existing.name,
+        summary: `${actorName} deleted task #${id} - "${existing.name}"`,
+      });
+
       return jsonResponse({ success: true, message: 'Task deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteTask] Database delete failed:', deleteError);
@@ -1406,11 +1521,19 @@ async function archiveClosedTasks(env: Env, request: Request): Promise<Response>
     
     const archivedCount = updateResult.meta?.changes || taskCount;
     console.log(`[archiveClosedTasks] Successfully archived ${archivedCount} tasks`);
-    
-    return jsonResponse({ 
-      success: true, 
-      archived_count: archivedCount, 
-      message: `${archivedCount} task(s) archived successfully` 
+
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.archived', actorType: 'human', actorId: user.id, actorName: user.name || user.id,
+      resourceType: 'task', resourceId: 0, taskId: null, taskName: null,
+      summary: `${user.name || user.id} archived ${archivedCount} completed task(s)`,
+      details: { archivedCount },
+    });
+
+    return jsonResponse({
+      success: true,
+      archived_count: archivedCount,
+      message: `${archivedCount} task(s) archived successfully`
     }, 200, request);
     
   } catch (error) {
@@ -1594,6 +1717,12 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createCronJob] Successfully created cron job:', cronJob.id);
+    const cronUser = await getCurrentUser(request, env);
+    await logActivity(env, {
+      actionType: 'cron_job.created', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+      actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+      resourceType: 'cron_job', resourceId: cronJob.id, summary: `${cronUser?.name || 'Unknown'} created cron job "${cronJob.name}"`,
+    });
     return jsonResponse({ cronJob }, 201);
   } catch (error) {
     console.error('[createCronJob] Unexpected error:', error);
@@ -1734,6 +1863,14 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     // Fetch the updated cron job
     const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     console.log('[updateCronJob] Fetched updated cron job:', JSON.stringify(cronJob));
+    if (cronJob) {
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.updated', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'Unknown'} updated cron job "${cronJob.name}"`,
+      });
+    }
     return jsonResponse({ cronJob });
   } catch (error) {
     console.error('[updateCronJob] Unexpected error:', error);
@@ -1761,7 +1898,12 @@ async function deleteCronJob(env: Env, id: number, request: Request): Promise<Re
       // Delete the cron job
       await env.DB.prepare('DELETE FROM cron_jobs WHERE id = ?').bind(id).run();
       console.log(`[deleteCronJob] Cron job ${id} deleted successfully`);
-      
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.deleted', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'Unknown'} deleted cron job "${existing.name}"`,
+      });
       return jsonResponse({ success: true, message: 'Cron job deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteCronJob] Database delete failed:', deleteError);
@@ -1807,6 +1949,12 @@ async function startCronJob(env: Env, id: number, request: Request): Promise<Res
       // Fetch the updated cron job
       const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
       console.log('[startCronJob] Cron job started successfully:', JSON.stringify(cronJob));
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.started', actorType: (cronUser?.type || 'system') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'system', actorName: cronUser?.name || 'System',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'System'} started cron job "${existing.name}"`,
+      });
       return jsonResponse({ cronJob, message: 'Cron job started' }, 200, request);
     } catch (dbError) {
       console.error('[startCronJob] Database operation failed:', dbError);
@@ -1873,6 +2021,12 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
       // Fetch the updated cron job
       const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
       console.log('[endCronJob] Cron job ended successfully:', JSON.stringify(cronJob));
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.ended', actorType: (cronUser?.type || 'system') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'system', actorName: cronUser?.name || 'System',
+        resourceType: 'cron_job', resourceId: id, summary: `Cron job "${existing.name}" completed with status ${status}`,
+      });
       return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
     } catch (dbError) {
       console.error('[endCronJob] Database operation failed:', dbError);
@@ -2245,6 +2399,15 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
       await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
     }
 
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(taskId).first<{ name: string }>();
+    const preview = content.trim().substring(0, 80);
+    await logActivity(env, {
+      actionType: 'comment.created', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+      resourceType: 'comment', resourceId: commentId, taskId, taskName: taskInfo?.name || null,
+      summary: `${user.name} commented on task #${taskId} - "${taskInfo?.name || 'Unknown'}": "${preview}"`,
+    });
+
     return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createComment] Error:', error);
@@ -2264,30 +2427,37 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
     }
 
     const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
 
     // Parse request body
     const body = await request.json() as CreateAgentCommentRequest;
-    const { content, agent_comment_type, mentions, auth_token } = body;
+    const { content, agent_comment_type, mentions } = body;
 
     // Validate content
     if (!content || content.trim().length === 0) {
-      return errorResponse('Content is required', 400, request);
+      return jsonResponse({ error: 'Comment content is required. Provide a non-empty "content" string in the request body.', field: 'content', hint: 'Example: { "content": "Task completed successfully.", "agent_comment_type": "status_update" }' }, 400, request);
     }
     if (content.length > 2000) {
-      return errorResponse('Content must be less than 2000 characters', 400, request);
+      return jsonResponse({ error: `Comment content is ${content.length} characters but the maximum is 2000. Please shorten your comment.`, field: 'content', hint: 'Truncate or split your comment into multiple smaller comments (max 2000 chars each).' }, 400, request);
+    }
+
+    // Validate agent_comment_type if provided
+    const validCommentTypes = ['status_update', 'question', 'completion', 'generic'];
+    const commentType = agent_comment_type || 'generic';
+    if (!validCommentTypes.includes(commentType)) {
+      return jsonResponse({ error: `Invalid agent_comment_type "${commentType}". Must be one of: ${validCommentTypes.join(', ')}`, field: 'agent_comment_type', hint: 'Use "status_update" for progress updates, "question" for asking the user, "completion" when done, or "generic" for anything else.' }, 400, request);
     }
 
     // Parse mentions (from provided list or parse from content)
     const mentionList = mentions || parseMentions(content);
     const mentionsJson = mentionList.length > 0 ? JSON.stringify(mentionList) : null;
 
-    // Insert comment with agent_comment_type
-    const commentType = agent_comment_type || 'generic';
+    // Insert comment with agent name from header
     const result = await env.DB.prepare(
-      `INSERT INTO comments 
+      `INSERT INTO comments
        (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type, mentions)
        VALUES (?, NULL, 'agent', ?, ?, ?, ?, ?)`
-    ).bind(taskId, agentId, agentId, content, commentType, mentionsJson).run();
+    ).bind(taskId, agentId, agentName, content, commentType, mentionsJson).run();
 
     const commentId = result.meta?.last_row_id;
     if (!commentId) {
@@ -2323,6 +2493,15 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
       await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
     }
 
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(taskId).first<{ name: string }>();
+    const preview = content.trim().substring(0, 80);
+    await logActivity(env, {
+      actionType: 'comment.created', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'comment', resourceId: commentId, taskId, taskName: taskInfo?.name || null,
+      summary: `${agentName} commented on task #${taskId} - "${taskInfo?.name || 'Unknown'}": "${preview}"`,
+    });
+
     return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createAgentComment] Error:', error);
@@ -2342,24 +2521,33 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     }
 
     const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
 
     // Parse request body
     const body = await request.json() as ClaimTaskRequest;
-    const { agent_id, auth_token } = body;
+    const { agent_id } = body;
+
+    // Verify task exists
+    const task = await env.DB.prepare(
+      'SELECT * FROM tasks WHERE id = ?'
+    ).bind(taskId).first<Task>();
+    if (!task) {
+      return jsonResponse({ error: `Task ${taskId} not found. Verify the task ID exists before claiming.`, field: 'task_id', hint: 'Use GET /tasks to list available tasks.' }, 404, request);
+    }
 
     // Update task to claimed status
     await env.DB.prepare(
-      `UPDATE tasks SET 
-       status = 'in_progress', 
+      `UPDATE tasks SET
+       status = 'in_progress',
        assigned_to_agent = 1,
        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     ).bind(taskId).run();
 
     // Create a system comment indicating the task was claimed
-    const claimMessage = `🔒 Task claimed by ${agent_id || agentId}`;
+    const claimMessage = `Task claimed by ${agentName}`;
     const result = await env.DB.prepare(
-      `INSERT INTO comments 
+      `INSERT INTO comments
        (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
        VALUES (?, NULL, 'system', 'system', 'System', ?, 'status_update')`
     ).bind(taskId, claimMessage).run();
@@ -2372,16 +2560,19 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     ).bind(taskId).run();
 
     // Notify task creator
-    const task = await env.DB.prepare(
-      'SELECT created_by FROM tasks WHERE id = ?'
-    ).bind(taskId).first<{ created_by: string | null }>();
-
-    if (task?.created_by) {
+    if (task.created_by) {
       await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
     }
 
-    return jsonResponse({ 
-      message: 'Task claimed successfully', 
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.claimed', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'task', resourceId: taskId, taskId, taskName: task.name,
+      summary: `${agentName} claimed task #${taskId} - "${task.name}"`,
+    });
+
+    return jsonResponse({
+      message: 'Task claimed successfully',
       agent_id: agent_id || agentId,
       comment_id: commentId
     }, 200, request);
@@ -2400,6 +2591,7 @@ async function releaseTask(env: Env, taskId: number, request: Request): Promise<
     }
 
     const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
 
     // Verify task exists and is currently claimed
     const task = await env.DB.prepare(
@@ -2407,11 +2599,11 @@ async function releaseTask(env: Env, taskId: number, request: Request): Promise<
     ).bind(taskId).first<Task>();
 
     if (!task) {
-      return errorResponse('Task not found', 404, request);
+      return jsonResponse({ error: `Task ${taskId} not found. Verify the task ID exists before releasing.`, field: 'task_id', hint: 'Use GET /tasks to list available tasks.' }, 404, request);
     }
 
     if (!task.assigned_to_agent) {
-      return errorResponse('Task is not currently claimed by an agent', 400, request);
+      return jsonResponse({ error: `Task ${taskId} ("${task.name}") is not currently claimed by an agent. You can only release tasks that have assigned_to_agent = 1.`, field: 'task_id', hint: 'Use GET /tasks/:id to check task state before releasing.' }, 400, request);
     }
 
     // Release the task - unassign agent, move back to inbox
@@ -2424,7 +2616,7 @@ async function releaseTask(env: Env, taskId: number, request: Request): Promise<
     ).bind(taskId).run();
 
     // Create a system comment indicating the task was released
-    const releaseMessage = `🔓 Task released by ${agentId}`;
+    const releaseMessage = `Task released by ${agentName}`;
     const result = await env.DB.prepare(
       `INSERT INTO comments
        (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
@@ -2442,6 +2634,13 @@ async function releaseTask(env: Env, taskId: number, request: Request): Promise<
     if (task.created_by) {
       await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
     }
+
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.released', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'task', resourceId: taskId, taskId, taskName: task.name,
+      summary: `${agentName} released task #${taskId} - "${task.name}"`,
+    });
 
     return jsonResponse({
       message: 'Task released successfully',
@@ -2515,6 +2714,16 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
+    // Log activity
+    if (updatedComment) {
+      const taskInfo = updatedComment.task_id ? await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(updatedComment.task_id).first<{ name: string }>() : null;
+      await logActivity(env, {
+        actionType: 'comment.updated', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+        resourceType: 'comment', resourceId: commentId, taskId: updatedComment.task_id, taskName: taskInfo?.name || null,
+        summary: `${user.name} edited comment on task #${updatedComment.task_id} - "${taskInfo?.name || 'Unknown'}"`,
+      });
+    }
+
     return jsonResponse({ comment: updatedComment }, 200, request);
   } catch (error) {
     console.error('[updateComment] Error:', error);
@@ -2559,6 +2768,14 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
     await env.DB.prepare(
       `UPDATE tasks SET comment_count = MAX(0, comment_count - 1), updated_at = CURRENT_TIMESTAMP WHERE id = ?`
     ).bind(comment.task_id).run();
+
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(comment.task_id).first<{ name: string }>();
+    await logActivity(env, {
+      actionType: 'comment.deleted', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+      resourceType: 'comment', resourceId: commentId, taskId: comment.task_id, taskName: taskInfo?.name || null,
+      summary: `${user.name} deleted comment on task #${comment.task_id} - "${taskInfo?.name || 'Unknown'}"`,
+    });
 
     return jsonResponse({ message: 'Comment deleted successfully' }, 200, request);
   } catch (error) {
@@ -2763,6 +2980,72 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
   } catch (error) {
     console.error('[markAllNotificationsRead] Error:', error);
     return errorResponse('Failed to mark notifications as read', 500);
+  }
+}
+
+// ============================================
+// ACTIVITY LOG HANDLER
+// ============================================
+
+async function listActivities(env: Env, params: URLSearchParams, request: Request): Promise<Response> {
+  try {
+    const types = params.get('types'); // comma-separated action types
+    const search = params.get('search');
+    const taskId = params.get('task_id');
+    const offset = parseInt(params.get('offset') || '0', 10);
+    const limitSetting = await getAdminSetting('activity_stream_limit', env, '50');
+    const limit = parseInt(params.get('limit') || limitSetting, 10);
+
+    let query = 'SELECT * FROM activity_log WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM activity_log WHERE 1=1';
+    const binds: unknown[] = [];
+    const countBinds: unknown[] = [];
+
+    if (types) {
+      const typeList = types.split(',').map(t => t.trim()).filter(Boolean);
+      if (typeList.length > 0) {
+        const placeholders = typeList.map(() => '?').join(',');
+        const clause = ` AND action_type IN (${placeholders})`;
+        query += clause;
+        countQuery += clause;
+        binds.push(...typeList);
+        countBinds.push(...typeList);
+      }
+    }
+
+    if (search) {
+      const clause = ' AND summary LIKE ?';
+      query += clause;
+      countQuery += clause;
+      binds.push(`%${search}%`);
+      countBinds.push(`%${search}%`);
+    }
+
+    if (taskId) {
+      const clause = ' AND task_id = ?';
+      query += clause;
+      countQuery += clause;
+      binds.push(parseInt(taskId, 10));
+      countBinds.push(parseInt(taskId, 10));
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    binds.push(limit, offset);
+
+    const [activitiesResult, countResult] = await Promise.all([
+      env.DB.prepare(query).bind(...binds).all<ActivityLog>(),
+      env.DB.prepare(countQuery).bind(...countBinds).first<{ total: number }>(),
+    ]);
+
+    return jsonResponse({
+      activities: activitiesResult.results || [],
+      total: countResult?.total || 0,
+      limit,
+      offset,
+    }, 200, request);
+  } catch (error) {
+    console.error('[listActivities] Error:', error);
+    return errorResponse('Failed to load activities', 500, request);
   }
 }
 

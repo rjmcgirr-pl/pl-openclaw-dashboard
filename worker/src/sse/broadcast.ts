@@ -160,6 +160,23 @@ export async function broadcastCommentCreated(
 }
 
 /**
+ * Broadcast activity created event
+ */
+export async function broadcastActivity(
+  env: Env,
+  activity: Record<string, unknown>
+): Promise<number> {
+  const event: TaskEvent = {
+    type: 'activity.created',
+    taskId: Number(activity.task_id || 0),
+    activity,
+    timestamp: new Date().toISOString(),
+  };
+
+  return broadcastTaskEvent(env, event);
+}
+
+/**
  * Broadcast task status changed event
  */
 export async function broadcastTaskStatusChanged(

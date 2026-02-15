@@ -278,3 +278,26 @@ export interface AdminSetting {
   updated_at: string;
   updated_by: string;
 }
+
+// Activity Log Types
+export type ActivityActionType =
+  | 'task.created' | 'task.updated' | 'task.deleted' | 'task.status_changed' | 'task.archived'
+  | 'comment.created' | 'comment.updated' | 'comment.deleted'
+  | 'reaction.added' | 'reaction.removed'
+  | 'cron_job.created' | 'cron_job.updated' | 'cron_job.deleted' | 'cron_job.started' | 'cron_job.ended'
+  | 'task.claimed' | 'task.released';
+
+export interface ActivityLog {
+  id: number;
+  action_type: ActivityActionType;
+  actor_type: 'human' | 'agent' | 'system';
+  actor_id: string;
+  actor_name: string;
+  resource_type: 'task' | 'comment' | 'cron_job' | 'reaction';
+  resource_id: number;
+  task_id: number | null;
+  task_name: string | null;
+  summary: string;
+  details: string | null;
+  created_at: string;
+}
