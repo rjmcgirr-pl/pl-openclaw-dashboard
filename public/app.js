@@ -52,6 +52,7 @@ let autoRefreshInterval = null;
 let cronRefreshInterval = null;
 let currentUser = null;
 let currentTab = 'tasks';
+let isCurrentUserAdmin = false;
 
 // SSE State
 let sseConnection = null;
@@ -178,9 +179,10 @@ async function init() {
         if (meResponse.ok) {
             const data = await meResponse.json();
             currentUser = data.user;
-            debugLog('User authenticated: ' + currentUser.name);
+            isCurrentUserAdmin = !!data.user.isAdmin;
+            debugLog('User authenticated: ' + currentUser.name + (isCurrentUserAdmin ? ' (admin)' : ''));
             await initializeDashboard();
-            
+
             // Check for deep link after dashboard loads
             checkUrlForDeepLink();
         } else if (meResponse.status === 401) {
@@ -209,6 +211,7 @@ async function initializeDashboard() {
     initSSE(); // Initialize real-time SSE connection
     loadNotifications(); // Load unread notifications
     startNotificationRefresh(); // Poll for new notifications
+    setupAdminPanel(); // Show admin tab if user is admin
     console.log('[Init] Dashboard initialized successfully');
 }
 
@@ -335,6 +338,7 @@ function startOAuthPolling() {
                     if (meResponse.ok) {
                         const data = await meResponse.json();
                         currentUser = data.user;
+                        isCurrentUserAdmin = !!data.user.isAdmin;
                         console.log('[OAuth] Session found after popup close');
                         hideLoginModal();
                         await initializeDashboard();
@@ -1496,22 +1500,33 @@ async function runCronJob(id) {
 
 // Tab Functions
 function switchTab(tabName) {
+    // Block non-admins from accessing admin tab
+    if (tabName === 'admin' && !isCurrentUserAdmin) {
+        return;
+    }
+
     currentTab = tabName;
-    
+
     // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
-    
+
     // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
     });
     document.getElementById(tabName + 'Tab').classList.add('active');
-    
+
     // Load archived tasks when switching to archive tab
     if (tabName === 'archive') {
         loadArchivedTasks();
+    }
+
+    // Load admin data when switching to admin tab
+    if (tabName === 'admin') {
+        loadAdminSettings();
+        loadAdminUsers();
     }
 }
 
@@ -2845,6 +2860,190 @@ function truncateText(text, maxLength) {
     if (!text) return '';
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + '...';
+}
+
+// ============================================
+// ADMIN PANEL FUNCTIONS
+// ============================================
+
+function setupAdminPanel() {
+    const adminTabBtn = document.getElementById('adminTabBtn');
+    if (!adminTabBtn) return;
+
+    if (isCurrentUserAdmin) {
+        adminTabBtn.style.display = '';
+        // Set up admin event listeners
+        const addBtn = document.getElementById('addAdminUserBtn');
+        if (addBtn) {
+            addBtn.addEventListener('click', addAdminUser);
+        }
+        const emailInput = document.getElementById('newAdminEmail');
+        if (emailInput) {
+            emailInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') addAdminUser();
+            });
+        }
+    } else {
+        adminTabBtn.style.display = 'none';
+    }
+}
+
+async function loadAdminSettings() {
+    const container = document.getElementById('adminSettingsList');
+    if (!container) return;
+
+    try {
+        const data = await apiRequest('/admin/settings');
+        if (data && data.settings) {
+            renderAdminSettings(data.settings);
+        }
+    } catch (error) {
+        container.innerHTML = '<div class="admin-loading">Failed to load settings</div>';
+        console.error('[Admin] Failed to load settings:', error);
+    }
+}
+
+function renderAdminSettings(settings) {
+    const container = document.getElementById('adminSettingsList');
+    if (!container) return;
+
+    if (!settings || settings.length === 0) {
+        container.innerHTML = '<div class="admin-loading">No settings configured</div>';
+        return;
+    }
+
+    container.innerHTML = settings.map(s => `
+        <div class="admin-setting-row" data-key="${s.key}">
+            <div class="admin-setting-info">
+                <div class="admin-setting-key">${escapeHtml(s.key)}</div>
+                <div class="admin-setting-desc">${escapeHtml(s.description || '')}</div>
+                <div class="admin-setting-meta">Last updated by ${escapeHtml(s.updated_by)} at ${new Date(s.updated_at).toLocaleString()}</div>
+            </div>
+            <div class="admin-setting-control">
+                <input type="text" class="admin-setting-input" value="${escapeHtml(s.value)}" data-key="${s.key}" data-original="${escapeHtml(s.value)}" />
+                <button class="btn-save-sm" onclick="saveAdminSetting('${s.key}', this)" disabled>Save</button>
+            </div>
+        </div>
+    `).join('');
+
+    // Enable save button when value changes
+    container.querySelectorAll('.admin-setting-input').forEach(input => {
+        input.addEventListener('input', (e) => {
+            const saveBtn = e.target.parentElement.querySelector('.btn-save-sm');
+            saveBtn.disabled = e.target.value === e.target.dataset.original;
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const saveBtn = e.target.parentElement.querySelector('.btn-save-sm');
+                if (!saveBtn.disabled) saveBtn.click();
+            }
+        });
+    });
+}
+
+async function saveAdminSetting(key, btn) {
+    const input = btn.parentElement.querySelector('.admin-setting-input');
+    const value = input.value.trim();
+    if (!value) return;
+
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    try {
+        const data = await apiRequest('/admin/settings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value })
+        });
+
+        if (data && data.setting) {
+            input.dataset.original = data.setting.value;
+            btn.textContent = 'Saved';
+            showToast(`Setting "${key}" updated`, 'success');
+            setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+        }
+    } catch (error) {
+        btn.textContent = 'Save';
+        btn.disabled = false;
+        showToast('Failed to save setting: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function loadAdminUsers() {
+    const container = document.getElementById('adminUsersList');
+    if (!container) return;
+
+    try {
+        const data = await apiRequest('/admin/users');
+        if (data && data.users) {
+            renderAdminUsers(data.users);
+        }
+    } catch (error) {
+        container.innerHTML = '<div class="admin-loading">Failed to load admin users</div>';
+        console.error('[Admin] Failed to load users:', error);
+    }
+}
+
+function renderAdminUsers(users) {
+    const container = document.getElementById('adminUsersList');
+    if (!container) return;
+
+    if (!users || users.length === 0) {
+        container.innerHTML = '<div class="admin-loading">No admin users</div>';
+        return;
+    }
+
+    container.innerHTML = users.map(u => {
+        const isSelf = currentUser && currentUser.email === u.email;
+        return `
+            <div class="admin-user-row">
+                <div class="admin-user-info">
+                    <div class="admin-user-email">${escapeHtml(u.email)}${isSelf ? ' (you)' : ''}</div>
+                    <div class="admin-user-meta">Added by ${escapeHtml(u.added_by)} on ${new Date(u.created_at).toLocaleDateString()}</div>
+                </div>
+                <div class="admin-user-actions">
+                    ${isSelf ? '' : `<button class="btn-danger-sm" onclick="removeAdminUser(${u.id}, '${escapeHtml(u.email)}')">Remove</button>`}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function addAdminUser() {
+    const input = document.getElementById('newAdminEmail');
+    if (!input) return;
+
+    const email = input.value.trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+        showToast('Enter a valid email address', 'error');
+        return;
+    }
+
+    try {
+        await apiRequest('/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+
+        input.value = '';
+        showToast(`${email} added as admin`, 'success');
+        await loadAdminUsers();
+    } catch (error) {
+        showToast('Failed to add admin: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function removeAdminUser(id, email) {
+    if (!confirm(`Remove ${email} from admins?`)) return;
+
+    try {
+        await apiRequest(`/admin/users/${id}`, { method: 'DELETE' });
+        showToast(`${email} removed from admins`, 'success');
+        await loadAdminUsers();
+    } catch (error) {
+        showToast('Failed to remove admin: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // ============================================

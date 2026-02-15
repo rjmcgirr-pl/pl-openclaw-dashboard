@@ -2316,3 +2316,200 @@ form {
     padding: 8px 16px;
     font-size: 13px;
 }
+
+/* ============================================
+   ADMIN PANEL STYLES
+   ============================================ */
+
+.admin-header {
+    margin-bottom: 24px;
+}
+
+.admin-header h2 {
+    margin: 0;
+    font-size: 20px;
+    color: var(--text-primary);
+}
+
+.admin-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.admin-section h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+/* Admin Settings */
+.admin-settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.admin-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.admin-setting-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-setting-key {
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+
+.admin-setting-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.admin-setting-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.admin-setting-input {
+    width: 120px;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: monospace;
+}
+
+.admin-setting-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.admin-setting-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* Admin Users */
+.admin-users-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.admin-input {
+    flex: 1;
+    max-width: 300px;
+    padding: 8px 12px;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.admin-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.btn-sm {
+    padding: 6px 14px;
+    font-size: 13px;
+}
+
+.admin-users-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-user-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.admin-user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.admin-user-email {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.admin-user-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.admin-user-actions {
+    flex-shrink: 0;
+}
+
+.btn-danger-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: var(--danger);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-danger-sm:hover {
+    opacity: 0.85;
+}
+
+.btn-save-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-save-sm:hover {
+    opacity: 0.85;
+}
+
+.admin-loading {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.admin-tab-btn {
+    margin-left: auto;
+}

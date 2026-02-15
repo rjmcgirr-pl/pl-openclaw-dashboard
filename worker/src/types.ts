@@ -262,3 +262,19 @@ export interface UpdateTagRequest {
 export interface TaskWithTags extends Task {
   tags?: Tag[];
 }
+
+// Admin Types
+export interface AdminUser {
+  id: number;
+  email: string;
+  added_by: string;
+  created_at: string;
+}
+
+export interface AdminSetting {
+  key: string;
+  value: string;
+  description: string | null;
+  updated_at: string;
+  updated_by: string;
+}

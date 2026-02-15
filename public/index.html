@@ -48,6 +48,7 @@
             <button class="tab-btn active" data-tab="tasks">📋 Tasks</button>
             <button class="tab-btn" data-tab="archive">📦 Archive</button>
             <button class="tab-btn" data-tab="cron">⏰ Cron Monitor</button>
+            <button class="tab-btn admin-only" data-tab="admin" id="adminTabBtn" style="display:none;">Admin</button>
         </nav>
 
         <!-- Tasks Tab -->
@@ -143,6 +144,33 @@
             </div>
             <div class="cron-jobs-list" id="cronJobsList">
                 <!-- Cron jobs will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Admin Tab (admin-only) -->
+        <div id="adminTab" class="tab-content admin-only">
+            <div class="admin-header">
+                <h2>Admin Panel</h2>
+            </div>
+
+            <!-- Admin Settings Section -->
+            <div class="admin-section">
+                <h3>Settings</h3>
+                <div id="adminSettingsList" class="admin-settings-list">
+                    <div class="admin-loading">Loading settings...</div>
+                </div>
+            </div>
+
+            <!-- Admin Users Section -->
+            <div class="admin-section">
+                <h3>Admin Users</h3>
+                <div class="admin-users-actions">
+                    <input type="email" id="newAdminEmail" placeholder="email@example.com" class="admin-input" />
+                    <button id="addAdminUserBtn" class="btn-primary btn-sm">Add Admin</button>
+                </div>
+                <div id="adminUsersList" class="admin-users-list">
+                    <div class="admin-loading">Loading users...</div>
+                </div>
             </div>
         </div>
     </div>

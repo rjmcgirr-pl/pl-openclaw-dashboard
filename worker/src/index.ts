@@ -1,4 +1,4 @@
-import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType } from './types';
+import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType, AdminUser, AdminSetting } from './types';
 import { SSEConnectionManager } from './sse/SSEConnectionManager';
 import { handleSSEConnect, handleSSEStats } from './routes/sse';
 import { emitTaskCreated, emitTaskUpdated, emitTaskDeleted } from './middleware/taskEvents';
@@ -182,6 +182,46 @@ async function getCurrentUser(request: Request, env: Env): Promise<{ type: 'huma
   }
   
   return null;
+}
+
+// Check if a user email is in the admin_users table
+async function isAdmin(email: string, env: Env): Promise<boolean> {
+  try {
+    const result = await env.DB.prepare(
+      'SELECT 1 FROM admin_users WHERE email = ?'
+    ).bind(email).first();
+    return !!result;
+  } catch {
+    return false;
+  }
+}
+
+// Get an admin setting value, with a fallback default
+async function getAdminSetting(key: string, env: Env, defaultValue: string): Promise<string> {
+  try {
+    const result = await env.DB.prepare(
+      'SELECT value FROM admin_settings WHERE key = ?'
+    ).bind(key).first<{ value: string }>();
+    return result?.value ?? defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+// Require admin access - returns error Response or null if allowed
+async function requireAdmin(request: Request, env: Env): Promise<{ error: Response | null; user: { type: string; id: string; name: string } | null }> {
+  const currentUser = await getCurrentUser(request, env);
+  if (!currentUser) {
+    return { error: jsonResponse({ error: 'Authentication required' }, 401, request), user: null };
+  }
+  if (currentUser.type !== 'human') {
+    return { error: jsonResponse({ error: 'Admin access requires human authentication' }, 403, request), user: null };
+  }
+  const admin = await isAdmin(currentUser.id, env);
+  if (!admin) {
+    return { error: jsonResponse({ error: 'Admin access denied' }, 403, request), user: null };
+  }
+  return { error: null, user: currentUser };
 }
 
 // Session validation helper
@@ -663,6 +703,55 @@ export default {
         return await syncCronJobs(env, request);
       }
 
+      // ============================================
+      // ADMIN ROUTES - require admin_users membership
+      // ============================================
+
+      // GET /admin/check - Check if current user is admin (lightweight)
+      if (path === '/admin/check' && method === 'GET') {
+        const user = await getCurrentUser(request, env);
+        if (!user) return jsonResponse({ isAdmin: false }, 200, request);
+        const admin = user.type === 'human' && await isAdmin(user.id, env);
+        return jsonResponse({ isAdmin: admin }, 200, request);
+      }
+
+      // GET /admin/settings - List all admin settings
+      if (path === '/admin/settings' && method === 'GET') {
+        const { error } = await requireAdmin(request, env);
+        if (error) return error;
+        return await listAdminSettings(env, request);
+      }
+
+      // PATCH /admin/settings - Update an admin setting
+      if (path === '/admin/settings' && method === 'PATCH') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        return await updateAdminSetting(env, request, user!);
+      }
+
+      // GET /admin/users - List admin users
+      if (path === '/admin/users' && method === 'GET') {
+        const { error } = await requireAdmin(request, env);
+        if (error) return error;
+        return await listAdminUsers(env, request);
+      }
+
+      // POST /admin/users - Add an admin user
+      if (path === '/admin/users' && method === 'POST') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        return await addAdminUser(env, request, user!);
+      }
+
+      // DELETE /admin/users/:id - Remove an admin user
+      const adminUserMatch = path.match(/^\/admin\/users\/(\d+)$/);
+      if (adminUserMatch && method === 'DELETE') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        const adminUserId = parseInt(adminUserMatch[1], 10);
+        return await removeAdminUser(env, adminUserId, request, user!);
+      }
+
       return errorResponse('Not found', 404);
     } catch (error) {
       console.error('Error handling request:', error);
@@ -899,9 +988,10 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   // Check for session cookie (OAuth)
   const session = await getSession(request, env);
   if (session) {
-    return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
+    const adminFlag = await isAdmin(session.email, env);
+    return jsonResponse({ user: { type: 'human', ...session, isAdmin: adminFlag } }, 200, request);
   }
-  
+
   // No valid authentication found
   return new Response(JSON.stringify({ error: 'Not authenticated' }), {
     status: 401,
@@ -1801,8 +1891,9 @@ async function listCronJobRuns(env: Env, id: number, request: Request): Promise<
     return errorResponse('Cron job not found', 404, request);
   }
 
+  const cronRunLimit = await getAdminSetting('cron_run_history_limit', env, '50');
   const { results } = await env.DB.prepare(
-    'SELECT * FROM cron_job_runs WHERE cron_job_id = ? ORDER BY started_at DESC LIMIT 50'
+    `SELECT * FROM cron_job_runs WHERE cron_job_id = ? ORDER BY started_at DESC LIMIT ${parseInt(cronRunLimit, 10)}`
   ).bind(id).all<CronJobRun>();
 
   return jsonResponse({ runs: results || [] }, 200, request);
@@ -2600,7 +2691,8 @@ async function listNotifications(env: Env, request: Request): Promise<Response> 
       query += ` AND n.is_read = 0`;
     }
     
-    query += ` ORDER BY n.created_at DESC LIMIT 50`;
+    const streamLimit = await getAdminSetting('activity_stream_limit', env, '50');
+    query += ` ORDER BY n.created_at DESC LIMIT ${parseInt(streamLimit, 10)}`;
 
     const notifications = await env.DB.prepare(query).bind(user.id).all<CommentNotification & { task_title: string; comment_preview: string }>();
 
@@ -2671,6 +2763,149 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
   } catch (error) {
     console.error('[markAllNotificationsRead] Error:', error);
     return errorResponse('Failed to mark notifications as read', 500);
+  }
+}
+
+// ============================================
+// ADMIN HANDLER FUNCTIONS
+// ============================================
+
+async function listAdminSettings(env: Env, request: Request): Promise<Response> {
+  try {
+    const settings = await env.DB.prepare(
+      'SELECT * FROM admin_settings ORDER BY key'
+    ).all<AdminSetting>();
+    return jsonResponse({ settings: settings.results }, 200, request);
+  } catch (error) {
+    console.error('[listAdminSettings] Error:', error);
+    return errorResponse('Failed to load admin settings', 500, request);
+  }
+}
+
+async function updateAdminSetting(
+  env: Env,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    const body = await request.json() as { key: string; value: string };
+    if (!body.key || body.value === undefined) {
+      return errorResponse('key and value are required', 400, request);
+    }
+
+    // Validate numeric settings
+    const numericKeys = ['activity_stream_limit', 'cron_run_history_limit', 'notification_poll_interval_ms', 'auto_refresh_interval_ms'];
+    if (numericKeys.includes(body.key)) {
+      const num = parseInt(body.value, 10);
+      if (isNaN(num) || num < 1) {
+        return errorResponse(`${body.key} must be a positive integer`, 400, request);
+      }
+    }
+
+    await env.DB.prepare(
+      `UPDATE admin_settings SET value = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE key = ?`
+    ).bind(body.value, user.id, body.key).run();
+
+    const updated = await env.DB.prepare(
+      'SELECT * FROM admin_settings WHERE key = ?'
+    ).bind(body.key).first<AdminSetting>();
+
+    if (!updated) {
+      return errorResponse('Setting not found', 404, request);
+    }
+
+    return jsonResponse({ setting: updated }, 200, request);
+  } catch (error) {
+    console.error('[updateAdminSetting] Error:', error);
+    return errorResponse('Failed to update setting', 500, request);
+  }
+}
+
+async function listAdminUsers(env: Env, request: Request): Promise<Response> {
+  try {
+    const users = await env.DB.prepare(
+      'SELECT * FROM admin_users ORDER BY created_at'
+    ).all<AdminUser>();
+    return jsonResponse({ users: users.results }, 200, request);
+  } catch (error) {
+    console.error('[listAdminUsers] Error:', error);
+    return errorResponse('Failed to load admin users', 500, request);
+  }
+}
+
+async function addAdminUser(
+  env: Env,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    const body = await request.json() as { email: string };
+    if (!body.email || !body.email.includes('@')) {
+      return errorResponse('Valid email is required', 400, request);
+    }
+
+    const email = body.email.toLowerCase().trim();
+
+    // Check if already exists
+    const existing = await env.DB.prepare(
+      'SELECT 1 FROM admin_users WHERE email = ?'
+    ).bind(email).first();
+    if (existing) {
+      return errorResponse('User is already an admin', 409, request);
+    }
+
+    await env.DB.prepare(
+      'INSERT INTO admin_users (email, added_by) VALUES (?, ?)'
+    ).bind(email, user.id).run();
+
+    const newUser = await env.DB.prepare(
+      'SELECT * FROM admin_users WHERE email = ?'
+    ).bind(email).first<AdminUser>();
+
+    return jsonResponse({ user: newUser }, 201, request);
+  } catch (error) {
+    console.error('[addAdminUser] Error:', error);
+    return errorResponse('Failed to add admin user', 500, request);
+  }
+}
+
+async function removeAdminUser(
+  env: Env,
+  adminUserId: number,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    // Fetch the user to be removed
+    const targetUser = await env.DB.prepare(
+      'SELECT * FROM admin_users WHERE id = ?'
+    ).bind(adminUserId).first<AdminUser>();
+
+    if (!targetUser) {
+      return errorResponse('Admin user not found', 404, request);
+    }
+
+    // Prevent removing yourself
+    if (targetUser.email === user.id) {
+      return errorResponse('Cannot remove yourself from admin', 400, request);
+    }
+
+    // Prevent removing the last admin
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) as cnt FROM admin_users'
+    ).first<{ cnt: number }>();
+    if (count && count.cnt <= 1) {
+      return errorResponse('Cannot remove the last admin user', 400, request);
+    }
+
+    await env.DB.prepare(
+      'DELETE FROM admin_users WHERE id = ?'
+    ).bind(adminUserId).run();
+
+    return jsonResponse({ success: true }, 200, request);
+  } catch (error) {
+    console.error('[removeAdminUser] Error:', error);
+    return errorResponse('Failed to remove admin user', 500, request);
   }
 }
 
