@@ -124,6 +124,42 @@ export async function broadcastTaskDeleted(
 }
 
 /**
+ * Broadcast notification created event to a specific user
+ */
+export async function broadcastNotification(
+  env: Env,
+  notification: Record<string, unknown>,
+  targetUserId: string
+): Promise<number> {
+  const event: TaskEvent = {
+    type: 'notification.created',
+    taskId: Number(notification.task_id || 0),
+    notification,
+    timestamp: new Date().toISOString(),
+  };
+
+  return broadcastTaskEvent(env, event, [targetUserId]);
+}
+
+/**
+ * Broadcast comment created event
+ */
+export async function broadcastCommentCreated(
+  env: Env,
+  comment: Record<string, unknown>,
+  taskId: number
+): Promise<number> {
+  const event: TaskEvent = {
+    type: 'comment.created',
+    taskId,
+    comment,
+    timestamp: new Date().toISOString(),
+  };
+
+  return broadcastTaskEvent(env, event);
+}
+
+/**
  * Broadcast task status changed event
  */
 export async function broadcastTaskStatusChanged(

@@ -2,6 +2,7 @@ import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobR
 import { SSEConnectionManager } from './sse/SSEConnectionManager';
 import { handleSSEConnect, handleSSEStats } from './routes/sse';
 import { emitTaskCreated, emitTaskUpdated, emitTaskDeleted } from './middleware/taskEvents';
+import { broadcastNotification, broadcastCommentCreated } from './sse/broadcast';
 
 // Dynamic CORS headers - origin must match the requesting site for credentials to work
 function getCorsHeaders(request: Request): Record<string, string> {
@@ -1969,12 +1970,14 @@ async function createNotificationsForMentions(
   for (const mention of mentions) {
     // Skip if the mentioned user is the comment author
     if (mention === excludeUserId) continue;
-    
+
     try {
       await env.DB.prepare(
         `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
          VALUES (?, 'mention', ?, ?)`
       ).bind(mention, taskId, commentId).run();
+      // Broadcast notification via SSE to the mentioned user
+      await broadcastNotification(env, { type: 'mention', task_id: taskId, comment_id: commentId, user_id: mention }, mention);
     } catch (error) {
       console.error(`[createNotificationsForMentions] Failed to create notification for ${mention}:`, error);
       // Continue creating other notifications
@@ -2000,6 +2003,8 @@ async function createReplyNotification(
       `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
        VALUES (?, 'reply', ?, ?)`
     ).bind(parentAuthorId, taskId, commentId).run();
+    // Broadcast notification via SSE to the parent comment author
+    await broadcastNotification(env, { type: 'reply', task_id: taskId, comment_id: commentId, user_id: parentAuthorId }, parentAuthorId);
   } catch (error) {
     console.error(`[createReplyNotification] Failed to create reply notification:`, error);
   }
@@ -2021,6 +2026,8 @@ async function createAgentCommentNotification(
       `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
        VALUES (?, 'agent_comment', ?, ?)`
     ).bind(taskCreatorId, taskId, commentId).run();
+    // Broadcast notification via SSE to the task creator
+    await broadcastNotification(env, { type: 'agent_comment', task_id: taskId, comment_id: commentId, user_id: taskCreatorId }, taskCreatorId);
   } catch (error) {
     console.error(`[createAgentCommentNotification] Failed to create agent comment notification:`, error);
   }
@@ -2142,6 +2149,11 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
+    // Broadcast comment created via SSE so other viewers see it in real-time
+    if (comment) {
+      await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
+    }
+
     return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createComment] Error:', error);
@@ -2214,6 +2226,11 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
     const comment = await env.DB.prepare(
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
+
+    // Broadcast comment created via SSE
+    if (comment) {
+      await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
+    }
 
     return jsonResponse({ comment }, 201, request);
   } catch (error) {

@@ -2550,6 +2550,10 @@ async function initSSE() {
         sseConnection.addEventListener('task.deleted', handleTaskDeleted);
         sseConnection.addEventListener('task.status_changed', handleTaskStatusChanged);
 
+        // Listen for notification and comment events
+        sseConnection.addEventListener('notification.created', handleNotificationCreated);
+        sseConnection.addEventListener('comment.created', handleCommentCreated);
+
         // Listen for heartbeat/ping
         sseConnection.addEventListener('ping', handleSSEHeartbeat);
 
@@ -2760,6 +2764,44 @@ function handleTaskStatusChanged(event) {
         }
     } catch (error) {
         console.error('[SSE] Error handling task.status_changed:', error);
+    }
+}
+
+function handleNotificationCreated(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Notification received - ${data.notification?.type}`);
+
+        // Refresh notification count immediately
+        loadNotifications();
+
+        // Show toast
+        const type = data.notification?.type || 'notification';
+        const typeLabels = { mention: 'You were mentioned', reply: 'New reply to your comment', agent_comment: 'Agent commented on your task' };
+        showToast(typeLabels[type] || 'New notification', 'info');
+    } catch (error) {
+        console.error('[SSE] Error handling notification.created:', error);
+    }
+}
+
+function handleCommentCreated(event) {
+    try {
+        const data = JSON.parse(event.data);
+        debugLog(`SSE: Comment created on task ${data.taskId}`);
+
+        // If we're currently viewing this task's comments, reload them
+        if (currentTaskIdForComments === data.taskId) {
+            loadComments(currentTaskIdForComments);
+        }
+
+        // Update comment count on the task card
+        const task = tasks.find(t => t.id === data.taskId);
+        if (task) {
+            task.comment_count = (task.comment_count || 0) + 1;
+            renderBoard();
+        }
+    } catch (error) {
+        console.error('[SSE] Error handling comment.created:', error);
     }
 }
 
