@@ -1,7 +1,9 @@
-import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType } from './types';
+import type { Env, Task, CreateTaskRequest, UpdateTaskRequest, CronJob, CronJobRun, CreateCronJobRequest, UpdateCronJobRequest, EndCronJobRequest, CronJobStatus, GoogleTokenResponse, GoogleUserInfo, Session, Comment, CommentReaction, CommentNotification, CreateCommentRequest, CreateAgentCommentRequest, AddReactionRequest, ClaimTaskRequest, AuthorType, AgentCommentType, AdminUser, AdminSetting } from './types';
 import { SSEConnectionManager } from './sse/SSEConnectionManager';
 import { handleSSEConnect, handleSSEStats } from './routes/sse';
 import { emitTaskCreated, emitTaskUpdated, emitTaskDeleted } from './middleware/taskEvents';
+import { broadcastNotification, broadcastCommentCreated, broadcastActivity } from './sse/broadcast';
+import type { ActivityActionType, ActivityLog } from './types';
 
 // Dynamic CORS headers - origin must match the requesting site for credentials to work
 function getCorsHeaders(request: Request): Record<string, string> {
@@ -12,6 +14,9 @@ function getCorsHeaders(request: Request): Record<string, string> {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Credentials': 'true',
     'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
   };
 }
 
@@ -149,18 +154,42 @@ function validateEmailDomain(email: string, allowedDomain: string): boolean {
 }
 
 // Agent API Key validation helper
-function validateAgentApiKey(request: Request, env: Env): { valid: boolean; agentId?: string } {
+function validateAgentApiKey(request: Request, env: Env): { valid: boolean; agentId?: string; agentName?: string } {
   const apiKey = request.headers.get('X-Agent-API-Key');
   if (!apiKey || !env.AGENT_API_KEY) {
     return { valid: false };
   }
-  
-  // Simple API key validation - in production could check KV for multiple keys
+
   if (apiKey === env.AGENT_API_KEY) {
-    return { valid: true, agentId: 'clawdbot' };
+    const agentName = request.headers.get('X-Agent-Name')?.trim() || undefined;
+    return { valid: true, agentId: 'clawdbot', agentName };
   }
-  
+
   return { valid: false };
+}
+
+// Require X-Agent-Name on mutating requests. Returns verbose error or null.
+function requireAgentName(request: Request, env: Env): Response | null {
+  const method = request.method;
+  if (method === 'GET' || method === 'OPTIONS' || method === 'HEAD') {
+    return null; // Read-only requests don't require agent name
+  }
+  const agentAuth = validateAgentApiKey(request, env);
+  if (!agentAuth.valid) {
+    return null; // Not an agent request, skip this check
+  }
+  if (!agentAuth.agentName) {
+    return new Response(JSON.stringify({
+      error: "Agent identification required. You must provide the 'X-Agent-Name' header with a human-readable display name (e.g., 'QA Agent', 'Deploy Bot'). This is used to identify your actions in the activity log and notifications.",
+      field: 'X-Agent-Name',
+      hint: "Add the header 'X-Agent-Name: Your Agent Name' to all POST, PATCH, and DELETE requests. The 'X-Agent-API-Key' header was valid but 'X-Agent-Name' is also required for all mutating requests.",
+      example: { headers: { 'X-Agent-API-Key': '<your-key>', 'X-Agent-Name': 'QA Agent' } }
+    }), {
+      status: 400,
+      headers: { ...getCorsHeaders(request), 'Content-Type': 'application/json' },
+    });
+  }
+  return null;
 }
 
 // Get current user identity (from session or agent API key)
@@ -168,16 +197,90 @@ async function getCurrentUser(request: Request, env: Env): Promise<{ type: 'huma
   // Check for agent auth first
   const agentAuth = validateAgentApiKey(request, env);
   if (agentAuth.valid && agentAuth.agentId) {
-    return { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentId };
+    return { type: 'agent', id: agentAuth.agentId, name: agentAuth.agentName || agentAuth.agentId };
   }
-  
+
   // Check for session
   const session = await getSession(request, env);
   if (session) {
     return { type: 'human', id: session.email, name: session.name };
   }
-  
+
   return null;
+}
+
+// Check if a user email is in the admin_users table
+async function isAdmin(email: string, env: Env): Promise<boolean> {
+  try {
+    const result = await env.DB.prepare(
+      'SELECT 1 FROM admin_users WHERE email = ?'
+    ).bind(email).first();
+    return !!result;
+  } catch {
+    return false;
+  }
+}
+
+// Get an admin setting value, with a fallback default
+async function getAdminSetting(key: string, env: Env, defaultValue: string): Promise<string> {
+  try {
+    const result = await env.DB.prepare(
+      'SELECT value FROM admin_settings WHERE key = ?'
+    ).bind(key).first<{ value: string }>();
+    return result?.value ?? defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+// Log an activity to the activity_log table and broadcast via SSE. Fire-and-forget.
+async function logActivity(env: Env, params: {
+  actionType: ActivityActionType;
+  actorType: 'human' | 'agent' | 'system';
+  actorId: string;
+  actorName: string;
+  resourceType: 'task' | 'comment' | 'cron_job' | 'reaction';
+  resourceId: number;
+  taskId?: number | null;
+  taskName?: string | null;
+  summary: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const detailsJson = params.details ? JSON.stringify(params.details) : null;
+    const result = await env.DB.prepare(
+      `INSERT INTO activity_log (action_type, actor_type, actor_id, actor_name, resource_type, resource_id, task_id, task_name, summary, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      params.actionType, params.actorType, params.actorId, params.actorName,
+      params.resourceType, params.resourceId,
+      params.taskId ?? null, params.taskName ?? null,
+      params.summary, detailsJson
+    ).run();
+    const activityId = result.meta?.last_row_id;
+    // Broadcast via SSE
+    await broadcastActivity(env, {
+      id: activityId, ...params, details: detailsJson, created_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[logActivity] Failed to log activity (non-fatal):', error);
+  }
+}
+
+// Require admin access - returns error Response or null if allowed
+async function requireAdmin(request: Request, env: Env): Promise<{ error: Response | null; user: { type: string; id: string; name: string } | null }> {
+  const currentUser = await getCurrentUser(request, env);
+  if (!currentUser) {
+    return { error: jsonResponse({ error: 'Authentication required' }, 401, request), user: null };
+  }
+  if (currentUser.type !== 'human') {
+    return { error: jsonResponse({ error: 'Admin access requires human authentication' }, 403, request), user: null };
+  }
+  const admin = await isAdmin(currentUser.id, env);
+  if (!admin) {
+    return { error: jsonResponse({ error: 'Admin access denied' }, 403, request), user: null };
+  }
+  return { error: null, user: currentUser };
 }
 
 // Session validation helper
@@ -419,6 +522,16 @@ export default {
         return await handleJwtLogin(request, env);
       }
 
+      // GET /auth/sse-token - Get a short-lived JWT for SSE connection
+      if (path === '/auth/sse-token' && method === 'GET') {
+        const user = await getCurrentUser(request, env);
+        if (!user) {
+          return jsonResponse({ error: 'Authentication required' }, 401, request);
+        }
+        const token = await generateJwtToken({ sub: user.id, name: user.name, type: user.type }, env);
+        return jsonResponse({ token }, 200, request);
+      }
+
       // SSE Routes - require JWT validation (handled in SSEConnectionManager)
       // GET /sse/connect - Establish SSE connection for real-time updates
       if (path === '/sse/connect' && method === 'GET') {
@@ -435,6 +548,18 @@ export default {
       if (sessionError) {
         return sessionError;
       }
+
+      // Require X-Agent-Name header on agent mutating requests
+      const agentNameError = requireAgentName(request, env);
+      if (agentNameError) {
+        return agentNameError;
+      }
+
+      // GET /activity - Activity log feed
+      if (path === '/activity' && method === 'GET') {
+        return await listActivities(env, url.searchParams, request);
+      }
+
       // GET /tasks - List all tasks
       if (path === '/tasks' && method === 'GET') {
         return await listTasks(env, url.searchParams, request);
@@ -648,6 +773,55 @@ export default {
       // POST /cron-jobs/sync - Full sync (delete all, insert new)
       if (path === '/cron-jobs/sync' && method === 'POST') {
         return await syncCronJobs(env, request);
+      }
+
+      // ============================================
+      // ADMIN ROUTES - require admin_users membership
+      // ============================================
+
+      // GET /admin/check - Check if current user is admin (lightweight)
+      if (path === '/admin/check' && method === 'GET') {
+        const user = await getCurrentUser(request, env);
+        if (!user) return jsonResponse({ isAdmin: false }, 200, request);
+        const admin = user.type === 'human' && await isAdmin(user.id, env);
+        return jsonResponse({ isAdmin: admin }, 200, request);
+      }
+
+      // GET /admin/settings - List all admin settings
+      if (path === '/admin/settings' && method === 'GET') {
+        const { error } = await requireAdmin(request, env);
+        if (error) return error;
+        return await listAdminSettings(env, request);
+      }
+
+      // PATCH /admin/settings - Update an admin setting
+      if (path === '/admin/settings' && method === 'PATCH') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        return await updateAdminSetting(env, request, user!);
+      }
+
+      // GET /admin/users - List admin users
+      if (path === '/admin/users' && method === 'GET') {
+        const { error } = await requireAdmin(request, env);
+        if (error) return error;
+        return await listAdminUsers(env, request);
+      }
+
+      // POST /admin/users - Add an admin user
+      if (path === '/admin/users' && method === 'POST') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        return await addAdminUser(env, request, user!);
+      }
+
+      // DELETE /admin/users/:id - Remove an admin user
+      const adminUserMatch = path.match(/^\/admin\/users\/(\d+)$/);
+      if (adminUserMatch && method === 'DELETE') {
+        const { error, user } = await requireAdmin(request, env);
+        if (error) return error;
+        const adminUserId = parseInt(adminUserMatch[1], 10);
+        return await removeAdminUser(env, adminUserId, request, user!);
       }
 
       return errorResponse('Not found', 404, request);
@@ -894,9 +1068,10 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   // Check for session cookie (OAuth)
   const session = await getSession(request, env);
   if (session) {
-    return jsonResponse({ user: { type: 'human', ...session } }, 200, request);
+    const adminFlag = await isAdmin(session.email, env);
+    return jsonResponse({ user: { type: 'human', ...session, isAdmin: adminFlag } }, 200, request);
   }
-  
+
   // No valid authentication found
   return new Response(JSON.stringify({ error: 'Not authenticated' }), {
     status: 401,
@@ -1063,7 +1238,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     // Validate required fields
     if (!body.name || body.name.trim() === '') {
       console.log('[createTask] Validation failed: name is empty');
-      return errorResponse('Task name is required', 400, request);
+      return jsonResponse({ error: 'Task name is required. Provide a non-empty "name" string in the request body.', field: 'name', hint: 'Example: { "name": "My Task", "status": "inbox" }' }, 400, request);
     }
 
     // Validate status if provided
@@ -1071,7 +1246,7 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     const status = body.status || 'inbox';
     if (!validStatuses.includes(status)) {
       console.log(`[createTask] Validation failed: invalid status "${status}"`);
-      return errorResponse(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400, request);
+      return jsonResponse({ error: `Invalid status "${status}". Must be one of: ${validStatuses.join(', ')}`, field: 'status', hint: `Provide a valid status string. Common values: "inbox" (default), "in_progress", "done". You sent: "${status}"` }, 400, request);
     }
 
     const name = body.name.trim();
@@ -1120,10 +1295,21 @@ async function createTask(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createTask] Successfully created task:', task.id);
-    
+
     // Emit task.created event for SSE
     await emitTaskCreated(env, task);
-    
+
+    // Log activity
+    const currentUser = await getCurrentUser(request, env);
+    const actorName = currentUser?.name || 'Unknown';
+    const actorType = currentUser?.type || 'human';
+    const actorId = currentUser?.id || 'unknown';
+    await logActivity(env, {
+      actionType: 'task.created', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+      resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+      summary: `${actorName} created task #${task.id} - "${task.name}"`,
+    });
+
     return jsonResponse({ task }, 201, request);
   } catch (error) {
     console.error('[createTask] Unexpected error:', error);
@@ -1232,12 +1418,35 @@ async function updateTask(env: Env, id: number, request: Request): Promise<Respo
   }
 
   console.log('[updateTask] Successfully updated task:', id);
-  
+
   // Emit task.updated event for SSE (existing was fetched at start of function)
   if (task) {
     await emitTaskUpdated(env, task, existing);
+
+    // Log activity
+    const currentUser = await getCurrentUser(request, env);
+    const actorName = currentUser?.name || 'Unknown';
+    const actorType = currentUser?.type || 'human';
+    const actorId = currentUser?.id || 'unknown';
+    const changedFields = Object.keys(body).filter(k => (body as Record<string, unknown>)[k] !== undefined);
+
+    if (existing.status !== task.status) {
+      await logActivity(env, {
+        actionType: 'task.status_changed', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+        resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+        summary: `${actorName} moved task #${task.id} - "${task.name}" from ${existing.status} to ${task.status}`,
+        details: { previousStatus: existing.status, newStatus: task.status },
+      });
+    } else {
+      await logActivity(env, {
+        actionType: 'task.updated', actorType: actorType as 'human' | 'agent' | 'system', actorId, actorName,
+        resourceType: 'task', resourceId: task.id, taskId: task.id, taskName: task.name,
+        summary: `${actorName} updated task #${task.id} - "${task.name}" (${changedFields.join(', ')})`,
+        details: { changedFields },
+      });
+    }
   }
-  
+
   return jsonResponse({ task }, 200, request);
   } catch (error) {
     console.error('[updateTask] Unexpected error:', error);
@@ -1263,7 +1472,17 @@ async function deleteTask(env: Env, id: number, request: Request): Promise<Respo
       
       // Emit task.deleted event for SSE
       await emitTaskDeleted(env, id);
-      
+
+      // Log activity
+      const currentUser = await getCurrentUser(request, env);
+      const actorName = currentUser?.name || 'Unknown';
+      await logActivity(env, {
+        actionType: 'task.deleted', actorType: (currentUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: currentUser?.id || 'unknown', actorName,
+        resourceType: 'task', resourceId: id, taskId: id, taskName: existing.name,
+        summary: `${actorName} deleted task #${id} - "${existing.name}"`,
+      });
+
       return jsonResponse({ success: true, message: 'Task deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteTask] Database delete failed:', deleteError);
@@ -1311,11 +1530,19 @@ async function archiveClosedTasks(env: Env, request: Request): Promise<Response>
     
     const archivedCount = updateResult.meta?.changes || taskCount;
     console.log(`[archiveClosedTasks] Successfully archived ${archivedCount} tasks`);
-    
-    return jsonResponse({ 
-      success: true, 
-      archived_count: archivedCount, 
-      message: `${archivedCount} task(s) archived successfully` 
+
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.archived', actorType: 'human', actorId: user.id, actorName: user.name || user.id,
+      resourceType: 'task', resourceId: 0, taskId: null, taskName: null,
+      summary: `${user.name || user.id} archived ${archivedCount} completed task(s)`,
+      details: { archivedCount },
+    });
+
+    return jsonResponse({
+      success: true,
+      archived_count: archivedCount,
+      message: `${archivedCount} task(s) archived successfully`
     }, 200, request);
     
   } catch (error) {
@@ -1499,6 +1726,12 @@ async function createCronJob(env: Env, request: Request): Promise<Response> {
     }
 
     console.log('[createCronJob] Successfully created cron job:', cronJob.id);
+    const cronUser = await getCurrentUser(request, env);
+    await logActivity(env, {
+      actionType: 'cron_job.created', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+      actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+      resourceType: 'cron_job', resourceId: cronJob.id, summary: `${cronUser?.name || 'Unknown'} created cron job "${cronJob.name}"`,
+    });
     return jsonResponse({ cronJob }, 201);
   } catch (error) {
     console.error('[createCronJob] Unexpected error:', error);
@@ -1639,6 +1872,14 @@ async function updateCronJob(env: Env, id: number, request: Request): Promise<Re
     // Fetch the updated cron job
     const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
     console.log('[updateCronJob] Fetched updated cron job:', JSON.stringify(cronJob));
+    if (cronJob) {
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.updated', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'Unknown'} updated cron job "${cronJob.name}"`,
+      });
+    }
     return jsonResponse({ cronJob });
   } catch (error) {
     console.error('[updateCronJob] Unexpected error:', error);
@@ -1666,7 +1907,12 @@ async function deleteCronJob(env: Env, id: number, request: Request): Promise<Re
       // Delete the cron job
       await env.DB.prepare('DELETE FROM cron_jobs WHERE id = ?').bind(id).run();
       console.log(`[deleteCronJob] Cron job ${id} deleted successfully`);
-      
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.deleted', actorType: (cronUser?.type || 'human') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'unknown', actorName: cronUser?.name || 'Unknown',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'Unknown'} deleted cron job "${existing.name}"`,
+      });
       return jsonResponse({ success: true, message: 'Cron job deleted' }, 200, request);
     } catch (deleteError) {
       console.error('[deleteCronJob] Database delete failed:', deleteError);
@@ -1712,6 +1958,12 @@ async function startCronJob(env: Env, id: number, request: Request): Promise<Res
       // Fetch the updated cron job
       const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
       console.log('[startCronJob] Cron job started successfully:', JSON.stringify(cronJob));
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.started', actorType: (cronUser?.type || 'system') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'system', actorName: cronUser?.name || 'System',
+        resourceType: 'cron_job', resourceId: id, summary: `${cronUser?.name || 'System'} started cron job "${existing.name}"`,
+      });
       return jsonResponse({ cronJob, message: 'Cron job started' }, 200, request);
     } catch (dbError) {
       console.error('[startCronJob] Database operation failed:', dbError);
@@ -1778,6 +2030,12 @@ async function endCronJob(env: Env, id: number, request: Request): Promise<Respo
       // Fetch the updated cron job
       const cronJob = await env.DB.prepare('SELECT * FROM cron_jobs WHERE id = ?').bind(id).first<CronJob>();
       console.log('[endCronJob] Cron job ended successfully:', JSON.stringify(cronJob));
+      const cronUser = await getCurrentUser(request, env);
+      await logActivity(env, {
+        actionType: 'cron_job.ended', actorType: (cronUser?.type || 'system') as 'human' | 'agent' | 'system',
+        actorId: cronUser?.id || 'system', actorName: cronUser?.name || 'System',
+        resourceType: 'cron_job', resourceId: id, summary: `Cron job "${existing.name}" completed with status ${status}`,
+      });
       return jsonResponse({ cronJob, message: `Cron job marked as ${status}` });
     } catch (dbError) {
       console.error('[endCronJob] Database operation failed:', dbError);
@@ -1796,8 +2054,9 @@ async function listCronJobRuns(env: Env, id: number, request: Request): Promise<
     return errorResponse('Cron job not found', 404, request);
   }
 
+  const cronRunLimit = await getAdminSetting('cron_run_history_limit', env, '50');
   const { results } = await env.DB.prepare(
-    'SELECT * FROM cron_job_runs WHERE cron_job_id = ? ORDER BY started_at DESC LIMIT 50'
+    `SELECT * FROM cron_job_runs WHERE cron_job_id = ? ORDER BY started_at DESC LIMIT ${parseInt(cronRunLimit, 10)}`
   ).bind(id).all<CronJobRun>();
 
   return jsonResponse({ runs: results || [] }, 200, request);
@@ -1965,12 +2224,14 @@ async function createNotificationsForMentions(
   for (const mention of mentions) {
     // Skip if the mentioned user is the comment author
     if (mention === excludeUserId) continue;
-    
+
     try {
       await env.DB.prepare(
         `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
          VALUES (?, 'mention', ?, ?)`
       ).bind(mention, taskId, commentId).run();
+      // Broadcast notification via SSE to the mentioned user
+      await broadcastNotification(env, { type: 'mention', task_id: taskId, comment_id: commentId, user_id: mention }, mention);
     } catch (error) {
       console.error(`[createNotificationsForMentions] Failed to create notification for ${mention}:`, error);
       // Continue creating other notifications
@@ -1996,6 +2257,8 @@ async function createReplyNotification(
       `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
        VALUES (?, 'reply', ?, ?)`
     ).bind(parentAuthorId, taskId, commentId).run();
+    // Broadcast notification via SSE to the parent comment author
+    await broadcastNotification(env, { type: 'reply', task_id: taskId, comment_id: commentId, user_id: parentAuthorId }, parentAuthorId);
   } catch (error) {
     console.error(`[createReplyNotification] Failed to create reply notification:`, error);
   }
@@ -2017,6 +2280,8 @@ async function createAgentCommentNotification(
       `INSERT INTO comment_notifications (user_id, type, task_id, comment_id)
        VALUES (?, 'agent_comment', ?, ?)`
     ).bind(taskCreatorId, taskId, commentId).run();
+    // Broadcast notification via SSE to the task creator
+    await broadcastNotification(env, { type: 'agent_comment', task_id: taskId, comment_id: commentId, user_id: taskCreatorId }, taskCreatorId);
   } catch (error) {
     console.error(`[createAgentCommentNotification] Failed to create agent comment notification:`, error);
   }
@@ -2138,6 +2403,20 @@ async function createComment(env: Env, taskId: number, request: Request): Promis
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
+    // Broadcast comment created via SSE so other viewers see it in real-time
+    if (comment) {
+      await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
+    }
+
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(taskId).first<{ name: string }>();
+    const preview = content.trim().substring(0, 80);
+    await logActivity(env, {
+      actionType: 'comment.created', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+      resourceType: 'comment', resourceId: commentId, taskId, taskName: taskInfo?.name || null,
+      summary: `${user.name} commented on task #${taskId} - "${taskInfo?.name || 'Unknown'}": "${preview}"`,
+    });
+
     return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createComment] Error:', error);
@@ -2157,30 +2436,37 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
     }
 
     const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
 
     // Parse request body
     const body = await request.json() as CreateAgentCommentRequest;
-    const { content, agent_comment_type, mentions, auth_token } = body;
+    const { content, agent_comment_type, mentions } = body;
 
     // Validate content
     if (!content || content.trim().length === 0) {
-      return errorResponse('Content is required', 400, request);
+      return jsonResponse({ error: 'Comment content is required. Provide a non-empty "content" string in the request body.', field: 'content', hint: 'Example: { "content": "Task completed successfully.", "agent_comment_type": "status_update" }' }, 400, request);
     }
     if (content.length > 2000) {
-      return errorResponse('Content must be less than 2000 characters', 400, request);
+      return jsonResponse({ error: `Comment content is ${content.length} characters but the maximum is 2000. Please shorten your comment.`, field: 'content', hint: 'Truncate or split your comment into multiple smaller comments (max 2000 chars each).' }, 400, request);
+    }
+
+    // Validate agent_comment_type if provided
+    const validCommentTypes = ['status_update', 'question', 'completion', 'generic'];
+    const commentType = agent_comment_type || 'generic';
+    if (!validCommentTypes.includes(commentType)) {
+      return jsonResponse({ error: `Invalid agent_comment_type "${commentType}". Must be one of: ${validCommentTypes.join(', ')}`, field: 'agent_comment_type', hint: 'Use "status_update" for progress updates, "question" for asking the user, "completion" when done, or "generic" for anything else.' }, 400, request);
     }
 
     // Parse mentions (from provided list or parse from content)
     const mentionList = mentions || parseMentions(content);
     const mentionsJson = mentionList.length > 0 ? JSON.stringify(mentionList) : null;
 
-    // Insert comment with agent_comment_type
-    const commentType = agent_comment_type || 'generic';
+    // Insert comment with agent name from header
     const result = await env.DB.prepare(
-      `INSERT INTO comments 
+      `INSERT INTO comments
        (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type, mentions)
        VALUES (?, NULL, 'agent', ?, ?, ?, ?, ?)`
-    ).bind(taskId, agentId, agentId, content, commentType, mentionsJson).run();
+    ).bind(taskId, agentId, agentName, content, commentType, mentionsJson).run();
 
     const commentId = result.meta?.last_row_id;
     if (!commentId) {
@@ -2211,6 +2497,20 @@ async function createAgentComment(env: Env, taskId: number, request: Request): P
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
+    // Broadcast comment created via SSE
+    if (comment) {
+      await broadcastCommentCreated(env, comment as unknown as Record<string, unknown>, taskId);
+    }
+
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(taskId).first<{ name: string }>();
+    const preview = content.trim().substring(0, 80);
+    await logActivity(env, {
+      actionType: 'comment.created', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'comment', resourceId: commentId, taskId, taskName: taskInfo?.name || null,
+      summary: `${agentName} commented on task #${taskId} - "${taskInfo?.name || 'Unknown'}": "${preview}"`,
+    });
+
     return jsonResponse({ comment }, 201, request);
   } catch (error) {
     console.error('[createAgentComment] Error:', error);
@@ -2230,24 +2530,33 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     }
 
     const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
 
     // Parse request body
     const body = await request.json() as ClaimTaskRequest;
-    const { agent_id, auth_token } = body;
+    const { agent_id } = body;
+
+    // Verify task exists
+    const task = await env.DB.prepare(
+      'SELECT * FROM tasks WHERE id = ?'
+    ).bind(taskId).first<Task>();
+    if (!task) {
+      return jsonResponse({ error: `Task ${taskId} not found. Verify the task ID exists before claiming.`, field: 'task_id', hint: 'Use GET /tasks to list available tasks.' }, 404, request);
+    }
 
     // Update task to claimed status
     await env.DB.prepare(
-      `UPDATE tasks SET 
-       status = 'in_progress', 
+      `UPDATE tasks SET
+       status = 'in_progress',
        assigned_to_agent = 1,
        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     ).bind(taskId).run();
 
     // Create a system comment indicating the task was claimed
-    const claimMessage = `🔒 Task claimed by ${agent_id || agentId}`;
+    const claimMessage = `Task claimed by ${agentName}`;
     const result = await env.DB.prepare(
-      `INSERT INTO comments 
+      `INSERT INTO comments
        (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
        VALUES (?, NULL, 'system', 'system', 'System', ?, 'status_update')`
     ).bind(taskId, claimMessage).run();
@@ -2260,16 +2569,19 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
     ).bind(taskId).run();
 
     // Notify task creator
-    const task = await env.DB.prepare(
-      'SELECT created_by FROM tasks WHERE id = ?'
-    ).bind(taskId).first<{ created_by: string | null }>();
-
-    if (task?.created_by) {
+    if (task.created_by) {
       await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
     }
 
-    return jsonResponse({ 
-      message: 'Task claimed successfully', 
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.claimed', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'task', resourceId: taskId, taskId, taskName: task.name,
+      summary: `${agentName} claimed task #${taskId} - "${task.name}"`,
+    });
+
+    return jsonResponse({
+      message: 'Task claimed successfully',
       agent_id: agent_id || agentId,
       comment_id: commentId
     }, 200, request);
@@ -2280,7 +2592,74 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
 }
 
 async function releaseTask(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501, request);
+  try {
+    // Validate Agent API Key
+    const agentAuth = validateAgentApiKey(request, env);
+    if (!agentAuth.valid) {
+      return errorResponse('Unauthorized - Invalid API Key', 401, request);
+    }
+
+    const agentId = agentAuth.agentId || 'agent';
+    const agentName = agentAuth.agentName || agentId;
+
+    // Verify task exists and is currently claimed
+    const task = await env.DB.prepare(
+      'SELECT * FROM tasks WHERE id = ?'
+    ).bind(taskId).first<Task>();
+
+    if (!task) {
+      return jsonResponse({ error: `Task ${taskId} not found. Verify the task ID exists before releasing.`, field: 'task_id', hint: 'Use GET /tasks to list available tasks.' }, 404, request);
+    }
+
+    if (!task.assigned_to_agent) {
+      return jsonResponse({ error: `Task ${taskId} ("${task.name}") is not currently claimed by an agent. You can only release tasks that have assigned_to_agent = 1.`, field: 'task_id', hint: 'Use GET /tasks/:id to check task state before releasing.' }, 400, request);
+    }
+
+    // Release the task - unassign agent, move back to inbox
+    await env.DB.prepare(
+      `UPDATE tasks SET
+       assigned_to_agent = 0,
+       status = 'inbox',
+       updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(taskId).run();
+
+    // Create a system comment indicating the task was released
+    const releaseMessage = `Task released by ${agentName}`;
+    const result = await env.DB.prepare(
+      `INSERT INTO comments
+       (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
+       VALUES (?, NULL, 'system', 'system', 'System', ?, 'status_update')`
+    ).bind(taskId, releaseMessage).run();
+
+    const commentId = result.meta?.last_row_id;
+
+    // Increment comment_count
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = comment_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(taskId).run();
+
+    // Notify task creator
+    if (task.created_by) {
+      await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
+    }
+
+    // Log activity
+    await logActivity(env, {
+      actionType: 'task.released', actorType: 'agent', actorId: agentId, actorName: agentName,
+      resourceType: 'task', resourceId: taskId, taskId, taskName: task.name,
+      summary: `${agentName} released task #${taskId} - "${task.name}"`,
+    });
+
+    return jsonResponse({
+      message: 'Task released successfully',
+      agent_id: agentId,
+      comment_id: commentId
+    }, 200, request);
+  } catch (error) {
+    console.error('[releaseTask] Error:', error);
+    return errorResponse('Failed to release task', 500, request);
+  }
 }
 
 /**
@@ -2344,6 +2723,16 @@ async function updateComment(env: Env, commentId: number, request: Request): Pro
       'SELECT * FROM comments WHERE id = ?'
     ).bind(commentId).first<Comment>();
 
+    // Log activity
+    if (updatedComment) {
+      const taskInfo = updatedComment.task_id ? await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(updatedComment.task_id).first<{ name: string }>() : null;
+      await logActivity(env, {
+        actionType: 'comment.updated', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+        resourceType: 'comment', resourceId: commentId, taskId: updatedComment.task_id, taskName: taskInfo?.name || null,
+        summary: `${user.name} edited comment on task #${updatedComment.task_id} - "${taskInfo?.name || 'Unknown'}"`,
+      });
+    }
+
     return jsonResponse({ comment: updatedComment }, 200, request);
   } catch (error) {
     console.error('[updateComment] Error:', error);
@@ -2388,6 +2777,14 @@ async function deleteComment(env: Env, commentId: number, request: Request): Pro
     await env.DB.prepare(
       `UPDATE tasks SET comment_count = MAX(0, comment_count - 1), updated_at = CURRENT_TIMESTAMP WHERE id = ?`
     ).bind(comment.task_id).run();
+
+    // Log activity
+    const taskInfo = await env.DB.prepare('SELECT name FROM tasks WHERE id = ?').bind(comment.task_id).first<{ name: string }>();
+    await logActivity(env, {
+      actionType: 'comment.deleted', actorType: user.type as 'human' | 'agent' | 'system', actorId: user.id, actorName: user.name,
+      resourceType: 'comment', resourceId: commentId, taskId: comment.task_id, taskName: taskInfo?.name || null,
+      summary: `${user.name} deleted comment on task #${comment.task_id} - "${taskInfo?.name || 'Unknown'}"`,
+    });
 
     return jsonResponse({ message: 'Comment deleted successfully' }, 200, request);
   } catch (error) {
@@ -2520,7 +2917,8 @@ async function listNotifications(env: Env, request: Request): Promise<Response> 
       query += ` AND n.is_read = 0`;
     }
 
-    query += ` ORDER BY n.created_at DESC LIMIT 50`;
+    const streamLimit = await getAdminSetting('activity_stream_limit', env, '50');
+    query += ` ORDER BY n.created_at DESC LIMIT ${parseInt(streamLimit, 10)}`;
 
     const notifications = await env.DB.prepare(query).bind(user.id).all<CommentNotification & { task_title: string; comment_preview: string }>();
 
@@ -2591,6 +2989,215 @@ async function markAllNotificationsRead(env: Env, request: Request): Promise<Res
   } catch (error) {
     console.error('[markAllNotificationsRead] Error:', error);
     return errorResponse('Failed to mark notifications as read', 500, request);
+  }
+}
+
+// ============================================
+// ACTIVITY LOG HANDLER
+// ============================================
+
+async function listActivities(env: Env, params: URLSearchParams, request: Request): Promise<Response> {
+  try {
+    const types = params.get('types'); // comma-separated action types
+    const search = params.get('search');
+    const taskId = params.get('task_id');
+    const offset = parseInt(params.get('offset') || '0', 10);
+    const limitSetting = await getAdminSetting('activity_stream_limit', env, '50');
+    const limit = parseInt(params.get('limit') || limitSetting, 10);
+
+    let query = 'SELECT * FROM activity_log WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM activity_log WHERE 1=1';
+    const binds: unknown[] = [];
+    const countBinds: unknown[] = [];
+
+    if (types) {
+      const typeList = types.split(',').map(t => t.trim()).filter(Boolean);
+      if (typeList.length > 0) {
+        const placeholders = typeList.map(() => '?').join(',');
+        const clause = ` AND action_type IN (${placeholders})`;
+        query += clause;
+        countQuery += clause;
+        binds.push(...typeList);
+        countBinds.push(...typeList);
+      }
+    }
+
+    if (search) {
+      const clause = ' AND summary LIKE ?';
+      query += clause;
+      countQuery += clause;
+      binds.push(`%${search}%`);
+      countBinds.push(`%${search}%`);
+    }
+
+    if (taskId) {
+      const clause = ' AND task_id = ?';
+      query += clause;
+      countQuery += clause;
+      binds.push(parseInt(taskId, 10));
+      countBinds.push(parseInt(taskId, 10));
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    binds.push(limit, offset);
+
+    const [activitiesResult, countResult] = await Promise.all([
+      env.DB.prepare(query).bind(...binds).all<ActivityLog>(),
+      env.DB.prepare(countQuery).bind(...countBinds).first<{ total: number }>(),
+    ]);
+
+    return jsonResponse({
+      activities: activitiesResult.results || [],
+      total: countResult?.total || 0,
+      limit,
+      offset,
+    }, 200, request);
+  } catch (error) {
+    console.error('[listActivities] Error:', error);
+    return errorResponse('Failed to load activities', 500, request);
+  }
+}
+
+// ============================================
+// ADMIN HANDLER FUNCTIONS
+// ============================================
+
+async function listAdminSettings(env: Env, request: Request): Promise<Response> {
+  try {
+    const settings = await env.DB.prepare(
+      'SELECT * FROM admin_settings ORDER BY key'
+    ).all<AdminSetting>();
+    return jsonResponse({ settings: settings.results }, 200, request);
+  } catch (error) {
+    console.error('[listAdminSettings] Error:', error);
+    return errorResponse('Failed to load admin settings', 500, request);
+  }
+}
+
+async function updateAdminSetting(
+  env: Env,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    const body = await request.json() as { key: string; value: string };
+    if (!body.key || body.value === undefined) {
+      return errorResponse('key and value are required', 400, request);
+    }
+
+    // Validate numeric settings
+    const numericKeys = ['activity_stream_limit', 'cron_run_history_limit', 'notification_poll_interval_ms', 'auto_refresh_interval_ms'];
+    if (numericKeys.includes(body.key)) {
+      const num = parseInt(body.value, 10);
+      if (isNaN(num) || num < 1) {
+        return errorResponse(`${body.key} must be a positive integer`, 400, request);
+      }
+    }
+
+    await env.DB.prepare(
+      `UPDATE admin_settings SET value = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE key = ?`
+    ).bind(body.value, user.id, body.key).run();
+
+    const updated = await env.DB.prepare(
+      'SELECT * FROM admin_settings WHERE key = ?'
+    ).bind(body.key).first<AdminSetting>();
+
+    if (!updated) {
+      return errorResponse('Setting not found', 404, request);
+    }
+
+    return jsonResponse({ setting: updated }, 200, request);
+  } catch (error) {
+    console.error('[updateAdminSetting] Error:', error);
+    return errorResponse('Failed to update setting', 500, request);
+  }
+}
+
+async function listAdminUsers(env: Env, request: Request): Promise<Response> {
+  try {
+    const users = await env.DB.prepare(
+      'SELECT * FROM admin_users ORDER BY created_at'
+    ).all<AdminUser>();
+    return jsonResponse({ users: users.results }, 200, request);
+  } catch (error) {
+    console.error('[listAdminUsers] Error:', error);
+    return errorResponse('Failed to load admin users', 500, request);
+  }
+}
+
+async function addAdminUser(
+  env: Env,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    const body = await request.json() as { email: string };
+    if (!body.email || !body.email.includes('@')) {
+      return errorResponse('Valid email is required', 400, request);
+    }
+
+    const email = body.email.toLowerCase().trim();
+
+    // Check if already exists
+    const existing = await env.DB.prepare(
+      'SELECT 1 FROM admin_users WHERE email = ?'
+    ).bind(email).first();
+    if (existing) {
+      return errorResponse('User is already an admin', 409, request);
+    }
+
+    await env.DB.prepare(
+      'INSERT INTO admin_users (email, added_by) VALUES (?, ?)'
+    ).bind(email, user.id).run();
+
+    const newUser = await env.DB.prepare(
+      'SELECT * FROM admin_users WHERE email = ?'
+    ).bind(email).first<AdminUser>();
+
+    return jsonResponse({ user: newUser }, 201, request);
+  } catch (error) {
+    console.error('[addAdminUser] Error:', error);
+    return errorResponse('Failed to add admin user', 500, request);
+  }
+}
+
+async function removeAdminUser(
+  env: Env,
+  adminUserId: number,
+  request: Request,
+  user: { type: string; id: string; name: string }
+): Promise<Response> {
+  try {
+    // Fetch the user to be removed
+    const targetUser = await env.DB.prepare(
+      'SELECT * FROM admin_users WHERE id = ?'
+    ).bind(adminUserId).first<AdminUser>();
+
+    if (!targetUser) {
+      return errorResponse('Admin user not found', 404, request);
+    }
+
+    // Prevent removing yourself
+    if (targetUser.email === user.id) {
+      return errorResponse('Cannot remove yourself from admin', 400, request);
+    }
+
+    // Prevent removing the last admin
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) as cnt FROM admin_users'
+    ).first<{ cnt: number }>();
+    if (count && count.cnt <= 1) {
+      return errorResponse('Cannot remove the last admin user', 400, request);
+    }
+
+    await env.DB.prepare(
+      'DELETE FROM admin_users WHERE id = ?'
+    ).bind(adminUserId).run();
+
+    return jsonResponse({ success: true }, 200, request);
+  } catch (error) {
+    console.error('[removeAdminUser] Error:', error);
+    return errorResponse('Failed to remove admin user', 500, request);
   }
 }
 
