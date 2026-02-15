@@ -661,9 +661,17 @@ export default {
 // OAuth Handler Functions
 
 async function handleGoogleAuth(url: URL, env: Env): Promise<Response> {
+  // Guard: fail early if OAuth is not configured
+  if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID === 'placeholder') {
+    return new Response(JSON.stringify({ error: 'Google OAuth not configured. GOOGLE_CLIENT_ID is missing or still set to placeholder.' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const redirectUri = `${url.protocol}//${url.host}/auth/callback`;
   const state = generateSessionId(); // Generate state for CSRF protection
-  
+
   // Store state in KV with short expiration (10 minutes)
   await env.SESSION_KV.put(`oauth_state:${state}`, 'pending', { expirationTtl: 600 });
 
