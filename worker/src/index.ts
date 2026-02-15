@@ -12,6 +12,9 @@ function getCorsHeaders(request: Request): Record<string, string> {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Credentials': 'true',
     'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
   };
 }
 
@@ -416,6 +419,16 @@ export default {
       // POST /auth/login - JWT login (public route, no session validation)
       if (path === '/auth/login' && method === 'POST') {
         return await handleJwtLogin(request, env);
+      }
+
+      // GET /auth/sse-token - Get a short-lived JWT for SSE connection
+      if (path === '/auth/sse-token' && method === 'GET') {
+        const user = await getCurrentUser(request, env);
+        if (!user) {
+          return jsonResponse({ error: 'Authentication required' }, 401, request);
+        }
+        const token = await generateJwtToken({ sub: user.id, name: user.name, type: user.type }, env);
+        return jsonResponse({ token }, 200, request);
       }
 
       // SSE Routes - require JWT validation (handled in SSEConnectionManager)
@@ -2271,7 +2284,66 @@ async function claimTask(env: Env, taskId: number, request: Request): Promise<Re
 }
 
 async function releaseTask(env: Env, taskId: number, request: Request): Promise<Response> {
-  return jsonResponse({ message: 'Not implemented' }, 501, request);
+  try {
+    // Validate Agent API Key
+    const agentAuth = validateAgentApiKey(request, env);
+    if (!agentAuth.valid) {
+      return errorResponse('Unauthorized - Invalid API Key', 401, request);
+    }
+
+    const agentId = agentAuth.agentId || 'agent';
+
+    // Verify task exists and is currently claimed
+    const task = await env.DB.prepare(
+      'SELECT * FROM tasks WHERE id = ?'
+    ).bind(taskId).first<Task>();
+
+    if (!task) {
+      return errorResponse('Task not found', 404, request);
+    }
+
+    if (!task.assigned_to_agent) {
+      return errorResponse('Task is not currently claimed by an agent', 400, request);
+    }
+
+    // Release the task - unassign agent, move back to inbox
+    await env.DB.prepare(
+      `UPDATE tasks SET
+       assigned_to_agent = 0,
+       status = 'inbox',
+       updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(taskId).run();
+
+    // Create a system comment indicating the task was released
+    const releaseMessage = `🔓 Task released by ${agentId}`;
+    const result = await env.DB.prepare(
+      `INSERT INTO comments
+       (task_id, parent_comment_id, author_type, author_id, author_name, content, agent_comment_type)
+       VALUES (?, NULL, 'system', 'system', 'System', ?, 'status_update')`
+    ).bind(taskId, releaseMessage).run();
+
+    const commentId = result.meta?.last_row_id;
+
+    // Increment comment_count
+    await env.DB.prepare(
+      `UPDATE tasks SET comment_count = comment_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(taskId).run();
+
+    // Notify task creator
+    if (task.created_by) {
+      await createAgentCommentNotification(env, taskId, commentId || 0, task.created_by);
+    }
+
+    return jsonResponse({
+      message: 'Task released successfully',
+      agent_id: agentId,
+      comment_id: commentId
+    }, 200, request);
+  } catch (error) {
+    console.error('[releaseTask] Error:', error);
+    return errorResponse('Failed to release task', 500, request);
+  }
 }
 
 /**

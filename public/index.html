@@ -20,6 +20,21 @@
                     <span class="sse-status-dot"></span>
                     <span class="sse-status-text">Offline</span>
                 </div>
+                <div class="notification-bell-container" style="position:relative;">
+                    <button id="notificationBellBtn" class="btn-icon" title="Notifications" onclick="toggleNotificationPanel()">
+                        🔔
+                        <span id="notificationBadge" class="notification-badge" style="display:none;">0</span>
+                    </button>
+                    <div id="notificationPanel" class="notification-panel" style="display:none;">
+                        <div class="notification-panel-header">
+                            <strong>Notifications</strong>
+                            <button class="btn-link" onclick="markAllNotificationsRead()">Mark all read</button>
+                        </div>
+                        <div id="notificationList" class="notification-list">
+                            <div class="notification-empty">No unread notifications</div>
+                        </div>
+                    </div>
+                </div>
                 <button id="archiveClosedBtn" class="btn-warning" title="Archive all closed tasks">
                     📦 Archive Closed
                 </button>

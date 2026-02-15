@@ -207,6 +207,8 @@ async function initializeDashboard() {
     startCronAutoRefresh();
     updateUserUI();
     initSSE(); // Initialize real-time SSE connection
+    loadNotifications(); // Load unread notifications
+    startNotificationRefresh(); // Poll for new notifications
     console.log('[Init] Dashboard initialized successfully');
 }
 
@@ -1168,6 +1170,43 @@ function setupEventListeners() {
             }
         });
     }
+
+    // Reply input handlers
+    const cancelReplyBtn = document.getElementById('cancelReplyBtn');
+    if (cancelReplyBtn) {
+        cancelReplyBtn.addEventListener('click', cancelReply);
+    }
+    const submitReplyBtn = document.getElementById('submitReplyBtn');
+    if (submitReplyBtn) {
+        submitReplyBtn.addEventListener('click', submitReply);
+    }
+    const replyInput = document.getElementById('replyInput');
+    const replyCharCount = document.getElementById('replyCharCount');
+    if (replyInput && submitReplyBtn) {
+        replyInput.addEventListener('input', () => {
+            const length = replyInput.value.length;
+            submitReplyBtn.disabled = length === 0;
+            if (replyCharCount) replyCharCount.textContent = length;
+        });
+        replyInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!submitReplyBtn.disabled) submitReply();
+            }
+        });
+    }
+
+    // @Mention autocomplete on comment input
+    if (commentInput) {
+        commentInput.addEventListener('input', handleMentionInput);
+    }
+
+    // Close reaction pickers on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.add-reaction-trigger') && !e.target.closest('.reaction-picker')) {
+            document.querySelectorAll('.reaction-picker').forEach(p => p.style.display = 'none');
+        }
+    });
 }
 
 // Smart polling configuration
@@ -1931,26 +1970,294 @@ function renderComments() {
     if (!commentsList) return;
 
     if (currentComments.length === 0) {
-        commentsList.innerHTML = '<div class="comments-empty">No comments yet. Add one below!</div>';
+        commentsList.innerHTML = '<div class="comments-empty"><div class="comments-empty-icon">💬</div>No comments yet. Add one below!</div>';
         return;
     }
 
-    const html = currentComments.map(comment => {
-        const author = comment.author_name || 'Unknown';
-        const text = escapeHtml(comment.content || '');
-        const time = formatDate(comment.created_at);
-        return `
-            <div class="comment-item">
+    const html = currentComments.map(comment => renderCommentThread(comment)).join('');
+    commentsList.innerHTML = html;
+}
+
+function renderCommentThread(comment) {
+    const mainHtml = renderSingleComment(comment, false);
+    let repliesHtml = '';
+    if (comment.replies && comment.replies.length > 0) {
+        repliesHtml = comment.replies.map(reply => renderSingleComment(reply, true)).join('');
+    }
+    return `<div class="comment-thread">${mainHtml}${repliesHtml}</div>`;
+}
+
+function renderSingleComment(comment, isReply) {
+    const author = comment.author_name || 'Unknown';
+    const isAgent = comment.author_type === 'agent';
+    const isSystem = comment.author_type === 'system';
+    const isOwn = currentUser && comment.author_id === currentUser.email;
+    const time = formatDate(comment.created_at);
+
+    // Build CSS classes
+    const classes = ['comment-item'];
+    if (isReply) classes.push('is-reply');
+    if (isAgent) classes.push('is-agent');
+    if (isOwn) classes.push('is-own');
+    if (comment.is_deleted) classes.push('is-deleted');
+
+    // Avatar
+    const initial = isAgent ? '🤖' : (author.charAt(0) || '?').toUpperCase();
+    const avatarHtml = `<div class="comment-avatar">${initial}</div>`;
+
+    // Agent badge
+    let agentBadge = '';
+    if (isAgent && comment.agent_comment_type) {
+        const typeLabels = { status_update: 'Status', question: 'Question', completion: 'Complete', generic: 'Agent' };
+        agentBadge = `<span class="comment-agent-badge">${typeLabels[comment.agent_comment_type] || 'Agent'}</span>`;
+    } else if (isAgent) {
+        agentBadge = '<span class="comment-agent-badge">Agent</span>';
+    } else if (isSystem) {
+        agentBadge = '<span class="comment-agent-badge">System</span>';
+    }
+
+    // Edited indicator
+    const editedTag = comment.is_edited ? '<span class="comment-timestamp">(edited)</span>' : '';
+
+    // Content - handle deleted and mentions
+    let contentHtml;
+    if (comment.is_deleted) {
+        contentHtml = '<em>This comment was deleted.</em>';
+    } else {
+        contentHtml = formatCommentContent(comment.content || '');
+    }
+
+    // Action buttons (only for non-deleted comments)
+    let actionsHtml = '';
+    if (!comment.is_deleted) {
+        const actions = [];
+        // Reply button (only on top-level comments)
+        if (!isReply) {
+            actions.push(`<button class="comment-action-btn" onclick="startReply(${comment.id}, '${escapeHtml(author)}')">↩ Reply</button>`);
+        }
+        // Edit button (only own comments)
+        if (isOwn) {
+            actions.push(`<button class="comment-action-btn" onclick="startEditComment(${comment.id})">✏️ Edit</button>`);
+        }
+        // Delete button (only own comments)
+        if (isOwn) {
+            actions.push(`<button class="comment-action-btn" onclick="deleteComment(${comment.id})">🗑 Delete</button>`);
+        }
+        // Reaction button
+        actions.push(`<button class="comment-action-btn add-reaction-trigger" onclick="toggleReactionPicker(${comment.id}, this)">😀+</button>`);
+
+        actionsHtml = `<div class="comment-actions">${actions.join('')}</div>`;
+    }
+
+    // Reactions display
+    let reactionsHtml = '';
+    if (comment.reactions && comment.reactions.length > 0) {
+        const grouped = {};
+        comment.reactions.forEach(r => {
+            if (!grouped[r.emoji]) grouped[r.emoji] = { count: 0, hasOwn: false };
+            grouped[r.emoji].count++;
+            if (currentUser && r.author_id === currentUser.email) grouped[r.emoji].hasOwn = true;
+        });
+        const reactionBtns = Object.entries(grouped).map(([emoji, data]) => {
+            const activeClass = data.hasOwn ? 'active' : '';
+            return `<button class="reaction-btn ${activeClass}" onclick="toggleReaction(${comment.id}, '${emoji}')"><span class="reaction-emoji">${emoji}</span><span class="reaction-count">${data.count}</span></button>`;
+        }).join('');
+        reactionsHtml = `<div class="comment-reactions">${reactionBtns}</div>`;
+    }
+
+    // Reaction picker (hidden by default)
+    const pickerHtml = `<div class="reaction-picker" id="reactionPicker-${comment.id}" style="display:none;">
+        <button class="reaction-picker-btn" onclick="toggleReaction(${comment.id}, '👍')">👍</button>
+        <button class="reaction-picker-btn" onclick="toggleReaction(${comment.id}, '✅')">✅</button>
+        <button class="reaction-picker-btn" onclick="toggleReaction(${comment.id}, '❓')">❓</button>
+        <button class="reaction-picker-btn" onclick="toggleReaction(${comment.id}, '🚀')">🚀</button>
+        <button class="reaction-picker-btn" onclick="toggleReaction(${comment.id}, '❤️')">❤️</button>
+    </div>`;
+
+    return `
+        <div class="${classes.join(' ')}" data-comment-id="${comment.id}">
+            ${avatarHtml}
+            <div class="comment-content">
                 <div class="comment-header">
                     <span class="comment-author">${escapeHtml(author)}</span>
-                    <span class="comment-time">${time}</span>
+                    ${agentBadge}
+                    <span class="comment-timestamp">${time}</span>
+                    ${editedTag}
                 </div>
-                <div class="comment-text">${text}</div>
+                <div class="comment-text">${contentHtml}</div>
+                ${reactionsHtml}
+                ${actionsHtml}
+                ${pickerHtml}
             </div>
-        `;
-    }).join('');
+        </div>
+    `;
+}
 
-    commentsList.innerHTML = html;
+function formatCommentContent(content) {
+    // Escape HTML first, then process @mentions
+    let html = escapeHtml(content);
+    // Highlight @mentions
+    html = html.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+    // Convert newlines to <br>
+    html = html.replace(/\n/g, '<br>');
+    return html;
+}
+
+// --- Comment Actions ---
+
+function startReply(commentId, authorName) {
+    replyingToCommentId = commentId;
+    const replyContainer = document.getElementById('replyInputContainer');
+    const replyAuthor = document.getElementById('replyToAuthor');
+    const replyInput = document.getElementById('replyInput');
+    if (replyContainer) replyContainer.style.display = 'block';
+    if (replyAuthor) replyAuthor.textContent = '@' + authorName;
+    if (replyInput) { replyInput.value = ''; replyInput.focus(); }
+}
+
+function cancelReply() {
+    replyingToCommentId = null;
+    const replyContainer = document.getElementById('replyInputContainer');
+    if (replyContainer) replyContainer.style.display = 'none';
+}
+
+async function submitReply() {
+    const replyInput = document.getElementById('replyInput');
+    const submitReplyBtn = document.getElementById('submitReplyBtn');
+    if (!replyInput || !currentTaskIdForComments || !replyingToCommentId) return;
+
+    const content = replyInput.value.trim();
+    if (!content) return;
+
+    if (submitReplyBtn) submitReplyBtn.disabled = true;
+
+    try {
+        await apiRequest(`/tasks/${currentTaskIdForComments}/comments`, {
+            method: 'POST',
+            body: JSON.stringify({ content, parent_comment_id: replyingToCommentId }),
+        });
+        cancelReply();
+        await loadComments(currentTaskIdForComments);
+        await refreshTaskCommentCount(currentTaskIdForComments);
+    } catch (error) {
+        console.error('Failed to submit reply:', error);
+        showError('Failed to submit reply: ' + error.message);
+    } finally {
+        if (submitReplyBtn) submitReplyBtn.disabled = false;
+    }
+}
+
+function startEditComment(commentId) {
+    const comment = findCommentById(commentId);
+    if (!comment) return;
+
+    editingCommentId = commentId;
+    // Replace the comment text with an edit textarea in-place
+    const commentEl = document.querySelector(`.comment-item[data-comment-id="${commentId}"] .comment-text`);
+    if (!commentEl) return;
+
+    const originalContent = comment.content || '';
+    commentEl.outerHTML = `
+        <div class="comment-edit-container">
+            <textarea class="comment-edit-input" id="editCommentInput-${commentId}" maxlength="2000">${escapeHtml(originalContent)}</textarea>
+            <div class="comment-edit-actions">
+                <button class="btn-secondary" onclick="cancelEditComment(${commentId})">Cancel</button>
+                <button class="btn-primary" onclick="saveEditComment(${commentId})">Save</button>
+            </div>
+        </div>
+    `;
+    const editInput = document.getElementById(`editCommentInput-${commentId}`);
+    if (editInput) editInput.focus();
+}
+
+function cancelEditComment(commentId) {
+    editingCommentId = null;
+    renderComments(); // Re-render to restore original view
+}
+
+async function saveEditComment(commentId) {
+    const editInput = document.getElementById(`editCommentInput-${commentId}`);
+    if (!editInput) return;
+
+    const content = editInput.value.trim();
+    if (!content) return;
+
+    try {
+        await apiRequest(`/comments/${commentId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ content }),
+        });
+        editingCommentId = null;
+        await loadComments(currentTaskIdForComments);
+    } catch (error) {
+        console.error('Failed to edit comment:', error);
+        showError('Failed to edit comment: ' + error.message);
+    }
+}
+
+async function deleteComment(commentId) {
+    if (!confirm('Delete this comment?')) return;
+
+    try {
+        await apiRequest(`/comments/${commentId}`, { method: 'DELETE' });
+        await loadComments(currentTaskIdForComments);
+        await refreshTaskCommentCount(currentTaskIdForComments);
+    } catch (error) {
+        console.error('Failed to delete comment:', error);
+        showError('Failed to delete comment: ' + error.message);
+    }
+}
+
+function findCommentById(commentId) {
+    for (const comment of currentComments) {
+        if (comment.id === commentId) return comment;
+        if (comment.replies) {
+            for (const reply of comment.replies) {
+                if (reply.id === commentId) return reply;
+            }
+        }
+    }
+    return null;
+}
+
+// --- Reactions ---
+
+function toggleReactionPicker(commentId, btnEl) {
+    // Close all open pickers first
+    document.querySelectorAll('.reaction-picker').forEach(p => p.style.display = 'none');
+    const picker = document.getElementById(`reactionPicker-${commentId}`);
+    if (picker) {
+        picker.style.display = picker.style.display === 'none' ? 'flex' : 'none';
+    }
+}
+
+async function toggleReaction(commentId, emoji) {
+    // Close picker
+    const picker = document.getElementById(`reactionPicker-${commentId}`);
+    if (picker) picker.style.display = 'none';
+
+    // Check if user already reacted with this emoji
+    const comment = findCommentById(commentId);
+    const hasReacted = comment && comment.reactions && comment.reactions.some(
+        r => r.emoji === emoji && currentUser && r.author_id === currentUser.email
+    );
+
+    try {
+        if (hasReacted) {
+            await apiRequest(`/comments/${commentId}/reactions`, {
+                method: 'DELETE',
+                body: JSON.stringify({ emoji }),
+            });
+        } else {
+            await apiRequest(`/comments/${commentId}/reactions`, {
+                method: 'POST',
+                body: JSON.stringify({ emoji }),
+            });
+        }
+        await loadComments(currentTaskIdForComments);
+    } catch (error) {
+        console.error('Failed to toggle reaction:', error);
+    }
 }
 
 async function submitComment() {
@@ -2008,19 +2315,224 @@ window.openCronJobModal = openCronJobModal;
 window.initiateGoogleAuth = initiateGoogleAuth;
 window.loadComments = loadComments;
 window.submitComment = submitComment;
+window.startReply = startReply;
+window.cancelReply = cancelReply;
+window.submitReply = submitReply;
+window.startEditComment = startEditComment;
+window.cancelEditComment = cancelEditComment;
+window.saveEditComment = saveEditComment;
+window.deleteComment = deleteComment;
+window.toggleReactionPicker = toggleReactionPicker;
+window.toggleReaction = toggleReaction;
+window.markNotificationRead = markNotificationRead;
+window.markAllNotificationsRead = markAllNotificationsRead;
+window.toggleNotificationPanel = toggleNotificationPanel;
+
+// ============================================
+// @Mention Autocomplete
+// ============================================
+
+const KNOWN_USERS = [
+    { id: 'richard', name: 'Richard', type: 'human' },
+    { id: 'clawdbot', name: 'ClawdBot', type: 'agent' },
+];
+
+function handleMentionInput(e) {
+    const textarea = e.target;
+    const value = textarea.value;
+    const cursorPos = textarea.selectionStart;
+
+    // Find @mention in progress at cursor
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    const dropdown = document.getElementById('mentionDropdown');
+    const dropdownList = document.getElementById('mentionDropdownList');
+    if (!dropdown || !dropdownList) return;
+
+    if (mentionMatch) {
+        const query = mentionMatch[1].toLowerCase();
+        const filtered = KNOWN_USERS.filter(u =>
+            u.id.toLowerCase().includes(query) || u.name.toLowerCase().includes(query)
+        );
+
+        if (filtered.length > 0) {
+            dropdownList.innerHTML = filtered.map(u => {
+                const avatarClass = u.type === 'agent' ? 'is-agent' : '';
+                const initial = u.type === 'agent' ? '🤖' : u.name.charAt(0).toUpperCase();
+                return `<div class="mention-dropdown-item" onclick="insertMention('${u.id}', '${textarea.id}')">
+                    <div class="mention-dropdown-avatar ${avatarClass}">${initial}</div>
+                    <span class="mention-dropdown-name">${escapeHtml(u.name)}</span>
+                    <span class="mention-dropdown-type">${u.type}</span>
+                </div>`;
+            }).join('');
+            dropdown.style.display = 'block';
+            return;
+        }
+    }
+    dropdown.style.display = 'none';
+}
+
+function insertMention(userId, textareaId) {
+    const textarea = document.getElementById(textareaId);
+    if (!textarea) return;
+
+    const value = textarea.value;
+    const cursorPos = textarea.selectionStart;
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const textAfterCursor = value.substring(cursorPos);
+
+    // Replace the @partial with @userId
+    const newBefore = textBeforeCursor.replace(/@\w*$/, `@${userId} `);
+    textarea.value = newBefore + textAfterCursor;
+    textarea.selectionStart = textarea.selectionEnd = newBefore.length;
+    textarea.focus();
+
+    // Hide dropdown
+    const dropdown = document.getElementById('mentionDropdown');
+    if (dropdown) dropdown.style.display = 'none';
+
+    // Update character count and button state
+    const submitBtn = document.getElementById('submitCommentBtn');
+    const charCount = document.getElementById('commentCharCount');
+    if (submitBtn) submitBtn.disabled = textarea.value.length === 0;
+    if (charCount) charCount.textContent = textarea.value.length;
+}
+window.insertMention = insertMention;
+
+// ============================================
+// Notifications
+// ============================================
+
+let notifications = [];
+let unreadNotificationCount = 0;
+
+async function loadNotifications() {
+    try {
+        const data = await apiRequest('/notifications?unread=true');
+        notifications = data.notifications || [];
+        unreadNotificationCount = data.unread_count || 0;
+        updateNotificationBadge();
+    } catch (error) {
+        console.error('Failed to load notifications:', error);
+    }
+}
+
+function updateNotificationBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (badge) {
+        badge.textContent = unreadNotificationCount;
+        badge.style.display = unreadNotificationCount > 0 ? 'flex' : 'none';
+    }
+}
+
+function toggleNotificationPanel() {
+    const panel = document.getElementById('notificationPanel');
+    if (!panel) return;
+
+    const isVisible = panel.style.display === 'block';
+    panel.style.display = isVisible ? 'none' : 'block';
+
+    if (!isVisible) {
+        loadNotifications();
+        renderNotificationPanel();
+    }
+}
+
+function renderNotificationPanel() {
+    const list = document.getElementById('notificationList');
+    if (!list) return;
+
+    if (notifications.length === 0) {
+        list.innerHTML = '<div class="notification-empty">No unread notifications</div>';
+        return;
+    }
+
+    list.innerHTML = notifications.map(n => {
+        const typeIcons = { mention: '@', reply: '↩', agent_comment: '🤖' };
+        const icon = typeIcons[n.type] || '💬';
+        const preview = escapeHtml(n.comment_preview || '');
+        const taskTitle = escapeHtml(n.task_title || 'Task');
+        const time = formatDate(n.created_at);
+        return `<div class="notification-item ${n.is_read ? '' : 'unread'}" onclick="markNotificationRead(${n.id}, ${n.task_id})">
+            <span class="notification-icon">${icon}</span>
+            <div class="notification-content">
+                <div class="notification-task">${taskTitle}</div>
+                <div class="notification-preview">${preview}</div>
+                <div class="notification-time">${time}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function markNotificationRead(notificationId, taskId) {
+    try {
+        await apiRequest(`/notifications/${notificationId}/read`, { method: 'POST' });
+        notifications = notifications.filter(n => n.id !== notificationId);
+        unreadNotificationCount = Math.max(0, unreadNotificationCount - 1);
+        updateNotificationBadge();
+        renderNotificationPanel();
+        // Open the task
+        if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task) openEditModal(task);
+        }
+    } catch (error) {
+        console.error('Failed to mark notification read:', error);
+    }
+}
+
+async function markAllNotificationsRead() {
+    try {
+        await apiRequest('/notifications/read-all', { method: 'POST' });
+        notifications = [];
+        unreadNotificationCount = 0;
+        updateNotificationBadge();
+        renderNotificationPanel();
+    } catch (error) {
+        console.error('Failed to mark all notifications read:', error);
+    }
+}
+
+let notificationRefreshInterval = null;
+function startNotificationRefresh() {
+    if (notificationRefreshInterval) clearInterval(notificationRefreshInterval);
+    notificationRefreshInterval = setInterval(loadNotifications, 30000); // Every 30s
+}
+
+// Close notification panel on outside click
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.notification-bell-container')) {
+        const panel = document.getElementById('notificationPanel');
+        if (panel) panel.style.display = 'none';
+    }
+});
 
 // ============================================
 // SSE (Server-Sent Events) Real-time Updates
 // ============================================
 
-function initSSE() {
+async function initSSE() {
     if (sseConnection) {
         debugLog('SSE: Closing existing connection before reconnect');
         closeSSE();
     }
 
-    const sseUrl = `${API_BASE_URL}/sse/connect`;
-    debugLog(`SSE: Connecting to ${sseUrl}`);
+    // Fetch a JWT token for SSE authentication
+    let sseToken = null;
+    try {
+        const tokenData = await apiRequest('/auth/sse-token');
+        sseToken = tokenData.token;
+        debugLog('SSE: Obtained auth token');
+    } catch (error) {
+        debugLog(`SSE: Failed to get auth token - ${error.message}`);
+        updateSSEStatus('error');
+        handleSSEReconnect();
+        return;
+    }
+
+    const sseUrl = `${API_BASE_URL}/sse/connect?token=${encodeURIComponent(sseToken)}`;
+    debugLog(`SSE: Connecting to ${API_BASE_URL}/sse/connect`);
 
     try {
         sseConnection = new EventSource(sseUrl, { withCredentials: true });
