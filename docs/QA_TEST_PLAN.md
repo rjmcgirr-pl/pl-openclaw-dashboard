@@ -96,13 +96,13 @@ ELSE:
 | Component | URL |
 |-----------|-----|
 | **Frontend** | https://dev.openclaw.propertyllama.com |
-| **API Worker** | https://taskboard-api-staging.rei-workers.workers.dev |
+| **API Worker** | https://dev.openclaw.api.propertyllama.com |
 
 ### 4.2 Production Environment
 | Component | URL |
 |-----------|-----|
 | **Frontend** | https://openclaw.propertyllama.com |
-| **API Worker** | https://taskboard-api.rei-workers.workers.dev |
+| **API Worker** | https://openclaw.api.propertyllama.com |
 
 ---
 

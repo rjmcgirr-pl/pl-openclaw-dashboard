@@ -24,11 +24,11 @@ A secure, full-stack task management board built with Cloudflare Workers, D1 (SQ
 | Component | Technology | URL |
 |-----------|-----------|-----|
 | Frontend | Cloudflare Pages | https://openclaw.propertyllama.com |
-| Backend | Cloudflare Worker | https://taskboard-api.rei-workers.workers.dev |
+| Backend | Cloudflare Worker | https://openclaw.api.propertyllama.com |
 | Database | Cloudflare D1 (SQLite) | openclaw-taskboard-db |
 
 **Production Site:** https://openclaw.propertyllama.com  
-**API Endpoint:** https://taskboard-api.rei-workers.workers.dev
+**API Endpoint:** https://openclaw.api.propertyllama.com
 
 ## Quick Start
 

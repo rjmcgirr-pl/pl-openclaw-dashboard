@@ -352,7 +352,7 @@ UPDATE cron_jobs SET payload = 'Task instructions not yet configured. Edit this 
 
 ### Example: Create Twitter Check Job
 ```bash
-curl -X POST https://taskboard-api.rei-workers.workers.dev/cron-jobs \
+curl -X POST https://openclaw.api.propertyllama.com/cron-jobs \
   -H "X-Dashboard-Password: your-password" \
   -H "Content-Type: application/json" \
   -d '{
@@ -370,7 +370,7 @@ curl -X POST https://taskboard-api.rei-workers.workers.dev/cron-jobs \
 
 ### Example: Update Job Model
 ```bash
-curl -X PATCH https://taskboard-api.rei-workers.workers.dev/cron-jobs/3 \
+curl -X PATCH https://openclaw.api.propertyllama.com/cron-jobs/3 \
   -H "X-Dashboard-Password: your-password" \
   -H "Content-Type: application/json" \
   -d '{

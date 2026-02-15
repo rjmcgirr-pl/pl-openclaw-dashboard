@@ -121,8 +121,8 @@ jobs:
       - name: Output Deployed URLs
         run: |
           echo "✅ Production deployed"
-          echo "Worker: https://openclaw.propertyllama.com"
-          echo "Pages: Check Cloudflare dashboard"
+          echo "API: https://openclaw.api.propertyllama.com"
+          echo "Dashboard: https://openclaw.propertyllama.com"
 
   # Stage 3: Smoke Test Production
   smoke-test-production:
@@ -137,7 +137,7 @@ jobs:
       - name: Test Production API
         run: |
           echo "Testing production API..."
-          PROD_URL="https://taskboard-api.rei-workers.workers.dev"
+          PROD_URL="https://openclaw.api.propertyllama.com"
           
           # Test 1: API responds (with retries)
           for i in 1 2 3; do
